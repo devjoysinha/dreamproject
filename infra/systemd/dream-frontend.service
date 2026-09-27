@@ -1,0 +1,18 @@
+[Unit]
+Description=Dream Next.js frontend
+After=network.target dream-backend.service
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/opt/dreamproject/Frontend
+Environment=NODE_ENV=production
+Environment=PORT=3000
+ExecStart=/usr/bin/npm run start -- --hostname 127.0.0.1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

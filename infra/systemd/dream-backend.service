@@ -1,0 +1,18 @@
+[Unit]
+Description=Dream catalogue API
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/opt/dreamproject/Backend
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/dreamproject/Backend/.env
+ExecStart=/usr/bin/node /opt/dreamproject/Backend/src/server.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

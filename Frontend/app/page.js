@@ -41,7 +41,7 @@ export default function Home() {
     <aside className="sidebar">
       <a className="brand" href="#top"><img src="https://leakshaven.com/images/logo.svg" alt=""/><span>leaks<b>haven</b></span></a>
       <nav className="primary-nav"><p>— Menu</p><a className="selected" href="#top"><NavIcon type="browse"/>Browse</a><a href="#studio"><NavIcon type="studio"/>Studio</a><a href="#chat"><NavIcon type="chat"/>Chat</a><a href="#account"><NavIcon type="account"/>Account</a></nav>
-      <nav className="library-nav"><p>— Library</p><a href="#lists"><NavIcon type="lists"/>My Lists</a><a href="#models"><NavIcon type="models"/>Models</a><a href="#shop"><NavIcon type="shop"/>Shop</a><a href="#rewards"><NavIcon type="rewards"/>Rewards</a></nav>
+      <nav className="library-nav"><p>— Library</p><a href="#lists"><NavIcon type="lists"/>My Lists</a><a href="/models"><NavIcon type="models"/>Models</a><a href="#shop"><NavIcon type="shop"/>Shop</a><a href="#rewards"><NavIcon type="rewards"/>Rewards</a></nav>
       <div className="sidebar-tail"><button className="support"><span className="support-dot"/>Support-Chat</button><button className="locale"><Flag/> English <Chevron/></button></div>
       <button className="balance" aria-label="Open balance details"><KeyIcon/><span>2</span><i/><PlusIcon/></button>
       <div className="account-chip"><span className="notice">3</span><span className="profile">LS</span><div><b>Sign in</b><small>Guest</small></div></div>
@@ -49,7 +49,7 @@ export default function Home() {
     <main id="top" className="main-content">
       <section className="top-strip">
         <div className="search-panel"><div className="search-row"><div className="search-input"><span className="search-icon-box"><SearchIcon/></span><input value={query} onChange={e => { setQuery(e.target.value); setVisibleCount(12); }} placeholder="Search & Filter" aria-label="Search and filter"/><a className="visual-search" href="#visual-search" aria-label="Visual search"><ScanEyeIcon/></a></div><button className="sort" aria-label="Sort results"><ClockIcon/><span>New</span><Chevron/></button></div></div>
-        <a className="models-link" href="#models"><UsersIcon/>Models</a>
+        <a className="models-link" href="/models"><UsersIcon/>Models</a>
       </section>
       <section id="models" className="cards-wrap"><div className="cards-grid">{visibleList.map(item => <article className="media-card" key={item.id}>
         <div className="warm-glow"/><div className="media-frame"><button className="media-open" aria-label={item.title}><img src={item.previewMedia || item.media} alt={item.title}/></button>{item.isTrending && <span className="trending">Trending</span>}<button className="card-more" aria-label="More actions"><MoreIcon/></button></div>
