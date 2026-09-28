@@ -8,9 +8,11 @@
     "start": "node src/server.js",
     "migrate": "node scripts/migrate.js",
     "import:models": "node scripts/import-models.js",
+    "migrate:images": "node scripts/migrate-imgcrate-images.js",
     "test": "node --test"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1141.0",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
