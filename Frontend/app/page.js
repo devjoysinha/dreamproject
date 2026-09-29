@@ -6,6 +6,7 @@ import MobileNav from './components/MobileNav';
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
 const sortOptions = [['newest', 'New'], ['trending', 'Trending'], ['name', 'A–Z']];
+const ethnicityOptions = [['', 'All Ethnicities'], ['arab', 'Arab'], ['asian', 'Asian'], ['ebony', 'Ebony'], ['indian', 'Indian'], ['latina', 'Latina'], ['white', 'White']];
 
 const formatSize = bytes => {
   if (!bytes) return '—';
@@ -46,6 +47,9 @@ function fallbackCards() {
     modelSlug: slugify(item.title), modelName: item.title,
   }));
 }
+function initialHomeQuery() {
+  return typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('q') || new URLSearchParams(window.location.search).get('query') || '';
+}
 
 function Sidebar() {
   return <aside className="sidebar">
@@ -65,7 +69,11 @@ export default function Home() {
   const fallback = useMemo(fallbackCards, []);
   const [items, setItems] = useState(fallback);
   const [total, setTotal] = useState(fallback.length);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialHomeQuery);
+  const [panelQuery, setPanelQuery] = useState(initialHomeQuery);
+  const [ethnicity, setEthnicity] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [trendingModels, setTrendingModels] = useState([]);
   const [sort, setSort] = useState('newest');
   const [sortOpen, setSortOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -85,12 +93,17 @@ export default function Home() {
     try { window.localStorage.setItem('leakporns-saved-links', JSON.stringify(saved)); } catch { /* local storage is optional */ }
   }, [saved]);
   useEffect(() => {
+    if (!searchOpen || trendingModels.length) return;
+    fetch(`${apiBase}/api/models?sort=links&limit=8&offset=0`).then(response => response.ok ? response.json() : Promise.reject(new Error('Trending unavailable'))).then(data => setTrendingModels(data.items)).catch(() => setTrendingModels([]));
+  }, [searchOpen, trendingModels.length]);
+  useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setIsLoading(true);
       try {
         const params = new URLSearchParams({ sort, limit: '24', offset: '0' });
         if (query.trim()) params.set('query', query.trim());
+        if (ethnicity) params.set('ethnicity', ethnicity);
         const response = await fetch(`${apiBase}/api/open-links?${params}`, { signal: controller.signal });
         if (!response.ok) throw new Error('Catalogue unavailable');
         const data = await response.json();
@@ -107,7 +120,7 @@ export default function Home() {
       }
     }, query ? 240 : 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [fallback, query, sort]);
+  }, [ethnicity, fallback, query, sort]);
 
   const loadMore = async () => {
     if (isLoadingMore || items.length >= total) return;
@@ -115,6 +128,7 @@ export default function Home() {
     try {
       const params = new URLSearchParams({ sort, limit: '24', offset: String(items.length) });
       if (query.trim()) params.set('query', query.trim());
+      if (ethnicity) params.set('ethnicity', ethnicity);
       const response = await fetch(`${apiBase}/api/open-links?${params}`);
       if (!response.ok) throw new Error('Catalogue unavailable');
       const data = await response.json();
@@ -124,15 +138,19 @@ export default function Home() {
   const toggleSaved = id => setSaved(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   const selectedHref = selectedItem?.modelSlug ? `/model/${encodeURIComponent(selectedItem.modelSlug)}` : '/models';
   const activeSort = sortOptions.find(([key]) => key === sort)?.[1] || 'New';
+  const openSearch = () => { setPanelQuery(query); setSearchOpen(true); };
+  const submitSearch = event => { event.preventDefault(); const nextQuery = panelQuery.trim(); setQuery(nextQuery); setSearchOpen(false); window.history.replaceState(null, '', nextQuery ? `/?q=${encodeURIComponent(nextQuery)}` : '/'); };
+  const chooseTrending = model => { const nextQuery = model.name.trim(); setPanelQuery(nextQuery); setQuery(nextQuery); setSearchOpen(false); window.history.replaceState(null, '', `/?q=${encodeURIComponent(nextQuery)}`); };
   const confirmAge = () => { setAgeOpen(false); try { window.localStorage.setItem('leakporns-age-verified', '1'); } catch { /* local storage is optional */ } };
 
   return <div className="site-shell">
     <Sidebar /><MobileNav active="browse" />
     <main id="top" className="main-content">
       <section className="top-strip">
-        <div className="search-panel"><div className="search-row"><div className="search-input"><span className="search-icon-box"><SearchIcon /></span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search & Filter" aria-label="Search open links" /><a className="visual-search" href="#models" aria-label="Jump to results"><ScanEyeIcon /></a></div><div className="sort-control"><button className="sort" type="button" aria-expanded={sortOpen} aria-haspopup="listbox" onClick={() => setSortOpen(value => !value)}><ClockIcon /><span>{activeSort}</span><Chevron /></button>{sortOpen && <div className="sort-menu" role="listbox" aria-label="Sort open links">{sortOptions.map(([value, label]) => <button key={value} type="button" role="option" aria-selected={sort === value} className={sort === value ? 'active' : ''} onClick={() => { setSort(value); setSortOpen(false); }}>{label}</button>)}</div>}</div></div></div>
+        <div className="search-panel"><div className="search-row"><div className="search-input"><button className="search-trigger" type="button" aria-expanded={searchOpen} aria-haspopup="dialog" onClick={openSearch}><span className="search-icon-box"><SearchIcon /></span><span>{query ? `“${query}”` : 'Search & Filter'}</span></button><a className="visual-search" href="/visual-search" aria-label="Visual image search"><ScanEyeIcon /></a></div><div className="sort-control"><button className="sort" type="button" aria-expanded={sortOpen} aria-haspopup="listbox" onClick={() => setSortOpen(value => !value)}><ClockIcon /><span>{activeSort}</span><Chevron /></button>{sortOpen && <div className="sort-menu" role="listbox" aria-label="Sort open links">{sortOptions.map(([value, label]) => <button key={value} type="button" role="option" aria-selected={sort === value} className={sort === value ? 'active' : ''} onClick={() => { setSort(value); setSortOpen(false); }}>{label}</button>)}</div>}</div></div></div>
         <a className="models-link" href="/models"><UsersIcon />Models</a>
       </section>
+      {searchOpen && <section className="search-sheet" role="dialog" aria-label="Search and Filter"><form className="search-sheet-form" onSubmit={submitSearch}><button className="search-sheet-icon" type="submit" aria-label="Search"><SearchIcon /></button><input autoFocus value={panelQuery} onChange={event => setPanelQuery(event.target.value)} placeholder="Search models..." aria-label="Search models..." /><button className="search-sheet-close" type="button" aria-label="Close search" onClick={() => setSearchOpen(false)}>×</button></form><div className="search-sheet-section"><div className="search-sheet-heading"><h2>Trending now</h2><span>Top {trendingModels.length || 8}</span></div><div className="trend-chips">{trendingModels.map((model, index) => <button key={model.id} type="button" onClick={() => chooseTrending(model)}><small>{String(index + 1).padStart(2, '0')}</small>{model.name}</button>)}</div></div><div className="search-sheet-section"><div className="search-sheet-heading"><h2>Discover</h2><span>Find</span></div><div className="discover-actions"><a href="/visual-search"><ScanEyeIcon />Visual Image Search</a><a href="/models"><UsersIcon />Browse all models</a></div></div><div className="search-sheet-section"><div className="search-sheet-heading"><h2>Ethnicity</h2><span>Filter</span></div><div className="ethnicity-chips">{ethnicityOptions.map(([value, label]) => <button key={value || 'all'} type="button" aria-pressed={ethnicity === value} className={ethnicity === value ? 'active' : ''} onClick={() => setEthnicity(value)}>{label}</button>)}</div></div><a className="bookmark-prompt" href="/account"><span>↪</span><b>Login for Bookmark Lists</b><small>Sign in to filter by your bookmark collections</small></a></section>}
       <section id="models" className="cards-wrap"><div className="cards-grid">{items.map((item, index) => {
         const profileHref = item.modelSlug ? `/model/${encodeURIComponent(item.modelSlug)}` : '/models';
         const openHref = item.megaUrl || profileHref;

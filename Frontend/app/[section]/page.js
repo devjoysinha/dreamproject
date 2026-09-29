@@ -8,6 +8,7 @@ const sections = {
   lists: { label: 'My Lists', description: 'Saved links are available from the catalogue today. Account-backed lists are coming next.' },
   shop: { label: 'Shop', description: 'The shop is being prepared for the Leakporns catalogue.' },
   rewards: { label: 'Rewards', description: 'Rewards will appear here when account activity is enabled.' },
+  'visual-search': { label: 'Visual Image Search', description: 'Upload-based visual search will be available when the image matching service is connected.' },
 };
 
 export function generateStaticParams() {

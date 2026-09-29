@@ -7,6 +7,7 @@ import { pool } from './db.js';
 const listQuery = z.object({
   query: z.string().trim().max(120).optional(),
   tag: z.string().trim().max(160).optional(),
+  ethnicity: z.enum(['arab', 'asian', 'ebony', 'indian', 'latina', 'white']).optional(),
   sort: z.enum(['newest', 'name', 'links']).default('newest'),
   limit: z.coerce.number().int().min(1).max(60).default(30),
   offset: z.coerce.number().int().min(0).default(0),
@@ -17,6 +18,7 @@ const paginationQuery = z.object({
 });
 const openLinksQuery = z.object({
   query: z.string().trim().max(120).optional(),
+  ethnicity: z.enum(['arab', 'asian', 'ebony', 'indian', 'latina', 'white']).optional(),
   sort: z.enum(['newest', 'trending', 'name']).default('newest'),
   limit: z.coerce.number().int().min(1).max(60).default(24),
   offset: z.coerce.number().int().min(0).default(0),
@@ -84,6 +86,10 @@ app.get('/api/open-links', async (req, res, next) => {
     values.push(`%${query.query}%`);
     filters.push(`(item.title ILIKE $${values.length} OR m.name ILIKE $${values.length} OR m.source_query ILIKE $${values.length})`);
   }
+  if (query.ethnicity) {
+    values.push(`%· ${query.ethnicity.toUpperCase()}%`);
+    filters.push(`m.summary_display ILIKE $${values.length}`);
+  }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   values.push(query.limit, query.offset);
   const from = 'FROM media_items item JOIN model_open_links relation ON relation.content_id = item.content_id JOIN models m ON m.id = relation.model_id';
@@ -112,6 +118,10 @@ app.get('/api/models', async (req, res, next) => {
   if (query.tag) {
     values.push(query.tag);
     filters.push(`EXISTS (SELECT 1 FROM model_tags filter_tag WHERE filter_tag.model_id = m.id AND filter_tag.code = $${values.length})`);
+  }
+  if (query.ethnicity) {
+    values.push(`%· ${query.ethnicity.toUpperCase()}%`);
+    filters.push(`m.summary_display ILIKE $${values.length}`);
   }
   // The models directory should only expose profiles that have usable open-link data.
   filters.push('link_counts.open_link_count > 0');
