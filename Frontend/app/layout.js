@@ -1,4 +1,5 @@
 import './globals.css';
+import CloudflareAnalytics from './components/CloudflareAnalytics';
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://leakporns.com';
 
@@ -21,5 +22,5 @@ export const viewport = {
 };
 
 export default function RootLayout({ children }) {
-  return <html lang="en"><body>{children}</body></html>;
+  return <html lang="en"><body>{children}<CloudflareAnalytics /></body></html>;
 }

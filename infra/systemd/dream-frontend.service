@@ -8,6 +8,7 @@ User=ec2-user
 WorkingDirectory=/opt/dreamproject/Frontend
 Environment=NODE_ENV=production
 Environment=PORT=3000
+EnvironmentFile=-/opt/dreamproject/Frontend/.env
 ExecStart=/usr/bin/npm run start -- --hostname 127.0.0.1
 Restart=on-failure
 RestartSec=5
