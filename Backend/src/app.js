@@ -15,6 +15,12 @@ const paginationQuery = z.object({
   limit: z.coerce.number().int().min(1).max(60).default(24),
   offset: z.coerce.number().int().min(0).default(0),
 });
+const openLinksQuery = z.object({
+  query: z.string().trim().max(120).optional(),
+  sort: z.enum(['newest', 'trending', 'name']).default('newest'),
+  limit: z.coerce.number().int().min(1).max(60).default(24),
+  offset: z.coerce.number().int().min(0).default(0),
+});
 
 const cardFields = `
   m.id, m.slug, m.name, m.profile_image_url AS "profileImageUrl",
@@ -38,6 +44,14 @@ function ordering(sort) {
   }[sort];
 }
 
+function openLinksOrdering(sort) {
+  return {
+    newest: 'item.created_at DESC NULLS LAST, item.title ASC',
+    trending: 'item.is_trending DESC, item.created_at DESC NULLS LAST, item.title ASC',
+    name: 'm.name ASC, item.created_at DESC NULLS LAST',
+  }[sort];
+}
+
 function parseOrRespond(schema, input, res) {
   const parsed = schema.safeParse(input);
   if (!parsed.success) {
@@ -56,6 +70,31 @@ app.get('/health', async (_req, res, next) => {
   try {
     await pool.query('SELECT 1');
     res.json({ status: 'ok' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/open-links', async (req, res, next) => {
+  const query = parseOrRespond(openLinksQuery, req.query, res);
+  if (!query) return;
+  const filters = [];
+  const values = [];
+  if (query.query) {
+    values.push(`%${query.query}%`);
+    filters.push(`(item.title ILIKE $${values.length} OR m.name ILIKE $${values.length} OR m.source_query ILIKE $${values.length})`);
+  }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  values.push(query.limit, query.offset);
+  const from = 'FROM media_items item JOIN model_open_links relation ON relation.content_id = item.content_id JOIN models m ON m.id = relation.model_id';
+  const sql = `SELECT item.content_id AS id, item.short_code AS "shortCode", item.title, item.image_url AS "imageUrl", item.image_count AS images, item.video_count AS videos, item.size_bytes AS "sizeBytes", item.size_display AS "sizeDisplay", item.created_at AS "createdAt", item.relative_age AS "relativeAge", item.is_trending AS "isTrending", item.is_premium AS "isPremium", item.mega_url AS "megaUrl", item.status, m.slug AS "modelSlug", m.name AS "modelName" ${from} ${where} ORDER BY ${openLinksOrdering(query.sort)} LIMIT $${values.length - 1} OFFSET $${values.length}`;
+  const totalSql = `SELECT COUNT(*)::int AS total ${from} ${where}`;
+  try {
+    const [items, total] = await Promise.all([
+      pool.query(sql, values),
+      pool.query(totalSql, values.slice(0, -2)),
+    ]);
+    res.json({ items: items.rows, total: total.rows[0].total, limit: query.limit, offset: query.offset });
   } catch (error) {
     next(error);
   }

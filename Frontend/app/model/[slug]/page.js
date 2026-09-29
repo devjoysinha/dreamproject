@@ -33,6 +33,8 @@ export default function ModelDetailPage() {
   const [model, setModel] = useState(null);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const [selectedLink, setSelectedLink] = useState(null);
+  const [shareStatus, setShareStatus] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -42,6 +44,33 @@ export default function ModelDetailPage() {
       .catch(fetchError => { if (fetchError.name !== 'AbortError') setError(fetchError.message); });
     return () => controller.abort();
   }, [slug]);
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem('leakporns-saved-models') || '[]');
+      setSaved(Array.isArray(stored) && stored.includes(slug));
+    } catch { /* local storage is optional */ }
+  }, [slug]);
 
-  return <div className="site-shell detail-shell"><DetailSidebar /><MobileNav active="models" /><main className="detail-main"><header className="detail-top"><form className="detail-search" action="/models"><span><Icon name="search" /></span><input name="query" defaultValue={model?.name ? `“${model.name}”` : ''} placeholder="Search & Filter" aria-label="Search models" /><button type="submit" aria-label="Search visually"><Icon name="scan" /></button><i /><b><Icon name="clock" /> New</b></form><a className="detail-models-link" href="/models"><Icon name="users" />Models</a></header>{error && <section className="detail-message"><h1>Model catalogue is ready to connect</h1><p>{error} Run the backend migration and importer, then reload this profile.</p><a href="/models">Return to models</a></section>}{!model && !error && <section className="detail-message"><p>Loading creator profile…</p></section>}{model && <section className="detail-layout"><aside className="profile-column"><article className="profile-hero"><img src={model.profileImageUrl} alt={`${model.name} profile`} /><div /><h1>{model.name}</h1><p>{model.summaryDisplay}</p></article><div className="profile-actions"><button type="button" aria-pressed={saved} aria-label={saved ? 'Remove saved profile' : 'Save profile'} onClick={() => setSaved(value => !value)}><Icon name="bookmark" /></button><button type="button"><Icon name="share" />Share</button><a href="/models"><Icon name="grid" />All Models</a></div><section className="profile-bio"><p className="eyebrow">— Bio</p><p>{model.bio || 'No biography is available for this creator yet.'}</p>{Object.entries(model.profileMeta || {}).slice(0, 5).map(([key, value]) => <span key={key}><b>{key}</b>{value}</span>)}</section></aside><section className="detail-media" aria-label={`${model.name} open links`}>{model.openLinks.map(link => <article className="detail-media-card" key={`${link.contentId}-${link.position}`}><img src={link.imageUrl} alt={link.title} loading="lazy" />{link.isTrending && <span className="trending">Trending</span>}<button type="button" className="card-more" aria-label={`More actions for ${link.title}`}><Icon name="more" /></button><div className="detail-card-copy"><h2>{link.title}</h2><p>{stats(link)}</p><div><a href={link.megaUrl || '#'} target="_blank" rel="noreferrer"><Icon name="link" />Open Link</a><button type="button" aria-label={`Add ${link.title}`}><Icon name="plus" /></button></div></div></article>)}</section></section>}</main></div>;
+  const toggleSaved = () => {
+    setSaved(value => {
+      try {
+        const stored = JSON.parse(window.localStorage.getItem('leakporns-saved-models') || '[]');
+        const next = value ? stored.filter(item => item !== slug) : [...new Set([...stored, slug])];
+        window.localStorage.setItem('leakporns-saved-models', JSON.stringify(next));
+      } catch { /* local storage is optional */ }
+      return !value;
+    });
+  };
+
+  const shareProfile = async () => {
+    const url = window.location.href;
+    try {
+      if (navigator.share) await navigator.share({ title: model?.name || 'Leakporns profile', url });
+      else await navigator.clipboard.writeText(url);
+      setShareStatus(navigator.share ? 'Shared' : 'Link copied');
+    } catch { setShareStatus('Share cancelled'); }
+    window.setTimeout(() => setShareStatus(''), 2200);
+  };
+
+  return <div className="site-shell detail-shell"><DetailSidebar /><MobileNav active="models" /><main className="detail-main"><header className="detail-top"><form className="detail-search" action="/models"><span><Icon name="search" /></span><input name="query" defaultValue={model?.name || ''} placeholder="Search & Filter" aria-label="Search models" /><button type="submit" aria-label="Search visually"><Icon name="scan" /></button><i /><b><Icon name="clock" /> New</b></form><a className="detail-models-link" href="/models"><Icon name="users" />Models</a></header>{error && <section className="detail-message"><h1>Model catalogue is ready to connect</h1><p>{error} Run the backend migration and importer, then reload this profile.</p><a href="/models">Return to models</a></section>}{!model && !error && <section className="detail-message"><p>Loading creator profile…</p></section>}{model && <section className="detail-layout"><aside className="profile-column"><article className="profile-hero"><img src={model.profileImageUrl} alt={`${model.name} profile`} /><div /><h1>{model.name}</h1><p>{model.summaryDisplay}</p></article><div className="profile-actions"><button type="button" aria-pressed={saved} aria-label={saved ? 'Remove saved profile' : 'Save profile'} onClick={toggleSaved}><Icon name="bookmark" /></button><button type="button" onClick={shareProfile}><Icon name="share" />Share</button><a href="/models"><Icon name="grid" />All Models</a>{shareStatus && <span className="share-status" aria-live="polite">{shareStatus}</span>}</div><section className="profile-bio"><p className="eyebrow">— Bio</p><p>{model.bio || 'No biography is available for this creator yet.'}</p>{Object.entries(model.profileMeta || {}).slice(0, 5).map(([key, value]) => <span key={key}><b>{key}</b>{value}</span>)}</section></aside><section className="detail-media" aria-label={`${model.name} open links`}>{model.openLinks.map(link => { const openHref = link.megaUrl || '/models'; return <article className="detail-media-card" key={`${link.contentId}-${link.position}`}><img src={link.imageUrl} alt={link.title} loading="lazy" />{link.isTrending && <span className="trending">Trending</span>}<button type="button" className="card-more" aria-label={`More actions for ${link.title}`} onClick={() => setSelectedLink(link)}><Icon name="more" /></button><div className="detail-card-copy"><h2>{link.title}</h2><p>{stats(link)}</p><div><a href={openHref} target={link.megaUrl ? '_blank' : undefined} rel={link.megaUrl ? 'noreferrer' : undefined}><Icon name="link" />Open Link</a><button type="button" aria-label={`Add ${link.title}`} onClick={() => setSelectedLink(link)}><Icon name="plus" /></button></div></div></article>; })}</section></section>}</main>{selectedLink && <div className="info-layer" role="presentation" onClick={() => setSelectedLink(null)}><section className="info-dialog" role="dialog" aria-modal="true" aria-labelledby="detail-link-title" onClick={event => event.stopPropagation()}><button className="dialog-close" type="button" aria-label="Close details" onClick={() => setSelectedLink(null)}>×</button><p className="eyebrow">— Open link</p><h2 id="detail-link-title">{selectedLink.title}</h2><p className="info-model">{model.name}</p><dl><div><dt>Images</dt><dd>{selectedLink.images || 0}</dd></div><div><dt>Videos</dt><dd>{selectedLink.videos || 0}</dd></div><div><dt>Size</dt><dd>{selectedLink.sizeDisplay || '—'}</dd></div></dl><div className="info-actions"><a href={selectedLink.megaUrl || '/models'} target={selectedLink.megaUrl ? '_blank' : undefined} rel={selectedLink.megaUrl ? 'noreferrer' : undefined}>Open link</a></div></section></div>}</div>;
 }

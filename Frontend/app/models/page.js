@@ -46,10 +46,16 @@ function Sidebar() {
   </aside>;
 }
 
-async function loadModels(sort, offset = 0) {
-  const response = await fetch(`${apiBase}/api/models?sort=${sort}&limit=30&offset=${offset}`);
+async function loadModels(sort, offset = 0, query = '') {
+  const params = new URLSearchParams({ sort, limit: '30', offset: String(offset) });
+  if (query.trim()) params.set('query', query.trim());
+  const response = await fetch(`${apiBase}/api/models?${params}`);
   if (!response.ok) throw new Error('Model catalogue is unavailable');
   return response.json();
+}
+
+function initialSearchQuery() {
+  return typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('query') || '';
 }
 
 export default function ModelsPage() {
@@ -59,25 +65,42 @@ export default function ModelsPage() {
   const [saved, setSaved] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
   const [sort, setSort] = useState('newest');
+  const [queryDraft, setQueryDraft] = useState(initialSearchQuery);
+  const [query, setQuery] = useState(initialSearchQuery);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   useEffect(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem('leakporns-saved-models') || '[]');
+      if (Array.isArray(stored)) setSaved(stored);
+    } catch { /* local storage is optional */ }
+  }, []);
+  useEffect(() => {
+    try { window.localStorage.setItem('leakporns-saved-models', JSON.stringify(saved)); } catch { /* local storage is optional */ }
+  }, [saved]);
+
+  useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
-    loadModels(sort).then(data => {
+    loadModels(sort, 0, query).then(data => {
       if (!cancelled) { setCreators(data.items); setTotal(data.total); }
     }).catch(() => {
       if (!cancelled) { setCreators(fallback); setTotal(fallback.length); }
     }).finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
-  }, [fallback, sort]);
-
+  }, [fallback, sort, query]);
   const chooseSort = value => { setSort(value); setShowFilters(false); };
+  const submitSearch = event => {
+    event.preventDefault();
+    const nextQuery = queryDraft.trim();
+    setQuery(nextQuery);
+    window.history.replaceState(null, '', nextQuery ? `/models?query=${encodeURIComponent(nextQuery)}` : '/models');
+  };
   const loadMore = async () => {
     setIsLoadingMore(true);
     try {
-      const data = await loadModels(sort, creators.length);
+      const data = await loadModels(sort, creators.length, query);
       setCreators(current => [...current, ...data.items]);
       setTotal(data.total);
     } finally { setIsLoadingMore(false); }
@@ -89,7 +112,7 @@ export default function ModelsPage() {
     <Sidebar />
     <MobileNav active="models" />
     <main className="models-main" id="main-content">
-      <header className="models-header"><div><p className="eyebrow">— Models</p><h1>{total.toLocaleString()} <span>creators</span></h1></div><div className="filter-control"><button className="filters-button" type="button" aria-expanded={showFilters} onClick={() => setShowFilters(open => !open)}><FilterIcon />Filters</button>{showFilters && <div className="filters-popover" role="dialog" aria-label="Catalogue order"><p>Order models</p><div>{sorts.map(([value, label]) => <button key={value} className={sort === value ? 'active' : ''} onClick={() => chooseSort(value)} type="button">{label}</button>)}</div></div>}</div></header>
+      <header className="models-header"><div><p className="eyebrow">— Models</p><h1>{total.toLocaleString()} <span>creators</span></h1></div><form className="models-search" onSubmit={submitSearch}><input value={queryDraft} onChange={event => setQueryDraft(event.target.value)} placeholder="Search models" aria-label="Search models" /><button type="submit">Search</button></form><div className="filter-control"><button className="filters-button" type="button" aria-expanded={showFilters} onClick={() => setShowFilters(open => !open)}><FilterIcon />Filters</button>{showFilters && <div className="filters-popover" role="dialog" aria-label="Catalogue order"><p>Order models</p><div>{sorts.map(([value, label]) => <button key={value} className={sort === value ? 'active' : ''} onClick={() => chooseSort(value)} type="button">{label}</button>)}</div></div>}</div></header>
       <p className="models-status" aria-live="polite">{isLoading ? 'Loading model catalogue…' : `Sorted by ${activeSort}`}</p>
       <section className="creator-grid" aria-label="Creators">{creators.map((creator, index) => <article className="creator-card" key={creator.id}>
         <img src={creator.profileImageUrl} alt={`${creator.name} profile`} loading={index < 5 ? 'eager' : 'lazy'} />
@@ -98,6 +121,7 @@ export default function ModelsPage() {
         <button className="bookmark" type="button" aria-label={`${saved.includes(creator.id) ? 'Remove' : 'Save'} ${creator.name}`} aria-pressed={saved.includes(creator.id)} onClick={() => toggleSaved(creator.id)}><BookmarkIcon filled={saved.includes(creator.id)} /></button>
         <a className="creator-copy" href={`/model/${encodeURIComponent(creator.slug)}`}><h2>{creator.name}</h2><p>{creator.sourceQuery ? `@${creator.sourceQuery.replace(/^@/, '')}` : ''}</p>{creator.summaryDisplay && <small>{creator.summaryDisplay.split('·').map((part, partIndex) => <span key={`${part}-${partIndex}`}>{part.trim()}{partIndex < creator.summaryDisplay.split('·').length - 1 && <i />}</span>)}</small>}</a>
       </article>)}</section>
+      {!isLoading && !creators.length && <section className="empty-creators"><h2>No creators found</h2><p>Try another model name or clear the search.</p><button type="button" onClick={() => { setQueryDraft(''); setQuery(''); }}>Clear search</button></section>}
       {creators.length < total && <button className="load-more" type="button" onClick={loadMore} disabled={isLoadingMore}>{isLoadingMore ? 'Loading…' : 'Load more'} <span>↓</span></button>}
     </main>
   </div>;
