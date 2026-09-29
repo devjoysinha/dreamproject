@@ -38,8 +38,8 @@ function CountryFlag({ summary }) {
 function Sidebar() {
   return <aside className="sidebar models-sidebar">
     <a className="brand" href="/"><img src="/7035402.svg" alt="Leakporns logo" /><span>leak<b>porns</b></span></a>
-    <nav className="primary-nav"><p>— Menu</p><a href="/"><NavIcon type="browse" />Browse</a><a href="#studio"><NavIcon type="studio" />Studio</a><a href="#chat"><NavIcon type="chat" />Chat</a><a href="#account"><NavIcon type="account" />Account</a></nav>
-    <nav className="library-nav"><p>— Library</p><a href="#lists"><NavIcon type="lists" />My Lists</a><a className="selected" href="/models" aria-current="page"><NavIcon type="models" />Models</a><a href="#shop"><NavIcon type="shop" />Shop</a><a href="#rewards"><NavIcon type="rewards" />Rewards</a></nav>
+    <nav className="primary-nav"><p>— Menu</p><a href="/"><NavIcon type="browse" />Browse</a><a href="/studio"><NavIcon type="studio" />Studio</a><a href="/chat"><NavIcon type="chat" />Chat</a><a href="/account"><NavIcon type="account" />Account</a></nav>
+    <nav className="library-nav"><p>— Library</p><a href="/lists"><NavIcon type="lists" />My Lists</a><a className="selected" href="/models" aria-current="page"><NavIcon type="models" />Models</a><a href="/shop"><NavIcon type="shop" />Shop</a><a href="/rewards"><NavIcon type="rewards" />Rewards</a></nav>
     <div className="sidebar-tail"><button className="support" type="button"><span className="support-dot" />Support-Chat</button><button className="locale" type="button"><Flag /> English <Chevron /></button></div>
     <button className="balance" type="button" aria-label="Open balance details"><KeyIcon /><span>3</span><i /><PlusIcon /></button>
     <div className="account-chip"><span className="profile">LS</span><div><b>Sign in</b><small>Guest</small></div></div>

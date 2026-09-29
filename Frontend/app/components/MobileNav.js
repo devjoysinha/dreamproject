@@ -3,8 +3,8 @@ import Link from 'next/link';
 const items = [
   ['browse', 'Browse', '/'],
   ['models', 'Models', '/models'],
-  ['chat', 'Chat', '#chat'],
-  ['account', 'Account', '#account'],
+  ['chat', 'Chat', '/chat'],
+  ['account', 'Account', '/account'],
 ];
 
 const paths = {
