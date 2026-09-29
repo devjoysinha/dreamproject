@@ -8,7 +8,10 @@ const listQuery = z.object({
   query: z.string().trim().max(120).optional(),
   tag: z.string().trim().max(160).optional(),
   ethnicity: z.enum(['arab', 'asian', 'ebony', 'indian', 'latina', 'white']).optional(),
-  sort: z.enum(['newest', 'name', 'links']).default('newest'),
+  country: z.string().trim().regex(/^[a-z]{2}$/i).optional(),
+  bodyType: z.string().trim().max(40).optional(),
+  cupSize: z.string().trim().regex(/^[a-z]{1,3}$/i).optional(),
+  sort: z.enum(['newest', 'name', 'links', 'hot']).default('newest'),
   limit: z.coerce.number().int().min(1).max(60).default(30),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -19,6 +22,9 @@ const paginationQuery = z.object({
 const openLinksQuery = z.object({
   query: z.string().trim().max(120).optional(),
   ethnicity: z.enum(['arab', 'asian', 'ebony', 'indian', 'latina', 'white']).optional(),
+  country: z.string().trim().regex(/^[a-z]{2}$/i).optional(),
+  bodyType: z.string().trim().max(40).optional(),
+  cupSize: z.string().trim().regex(/^[a-z]{1,3}$/i).optional(),
   sort: z.enum(['newest', 'trending', 'name']).default('newest'),
   limit: z.coerce.number().int().min(1).max(60).default(24),
   offset: z.coerce.number().int().min(0).default(0),
@@ -43,6 +49,7 @@ function ordering(sort) {
     newest: 'm.source_updated_at DESC NULLS LAST, m.name ASC',
     name: 'm.name ASC',
     links: 'link_counts.open_link_count DESC, m.name ASC',
+    hot: 'link_counts.trending_count DESC, link_counts.open_link_count DESC, m.source_updated_at DESC NULLS LAST, m.name ASC',
   }[sort];
 }
 
@@ -90,6 +97,18 @@ app.get('/api/open-links', async (req, res, next) => {
     values.push(`%· ${query.ethnicity.toUpperCase()}%`);
     filters.push(`m.summary_display ILIKE $${values.length}`);
   }
+  if (query.country) {
+    values.push(`(^| · )${query.country.toUpperCase()}( · |$)`);
+    filters.push(`m.summary_display ~ $${values.length}`);
+  }
+  if (query.bodyType) {
+    values.push(query.bodyType);
+    filters.push(`m.profile_meta->>'body' ILIKE $${values.length}`);
+  }
+  if (query.cupSize) {
+    values.push(`(^|[0-9])${query.cupSize.toUpperCase()}(\\s|\\(|$)`);
+    filters.push(`m.profile_meta->>'chest' ~* $${values.length}`);
+  }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   values.push(query.limit, query.offset);
   const from = 'FROM media_items item JOIN model_open_links relation ON relation.content_id = item.content_id JOIN models m ON m.id = relation.model_id';
@@ -123,6 +142,18 @@ app.get('/api/models', async (req, res, next) => {
     values.push(`%· ${query.ethnicity.toUpperCase()}%`);
     filters.push(`m.summary_display ILIKE $${values.length}`);
   }
+  if (query.country) {
+    values.push(`(^| · )${query.country.toUpperCase()}( · |$)`);
+    filters.push(`m.summary_display ~ $${values.length}`);
+  }
+  if (query.bodyType) {
+    values.push(query.bodyType);
+    filters.push(`m.profile_meta->>'body' ILIKE $${values.length}`);
+  }
+  if (query.cupSize) {
+    values.push(`(^|[0-9])${query.cupSize.toUpperCase()}(\\s|\\(|$)`);
+    filters.push(`m.profile_meta->>'chest' ~* $${values.length}`);
+  }
   // The models directory should only expose profiles that have usable open-link data.
   filters.push('link_counts.open_link_count > 0');
   values.push(query.limit, query.offset);
@@ -149,6 +180,47 @@ app.get('/api/tags', async (_req, res, next) => {
       ORDER BY "modelCount" DESC, label ASC
     `);
     res.json({ items: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const countryNames = {
+  AE: 'United Arab Emirates', AR: 'Argentina', AU: 'Australia', BE: 'Belgium', BR: 'Brazil', CA: 'Canada',
+  CH: 'Switzerland', CN: 'China', CO: 'Colombia', CU: 'Cuba', CZ: 'Czechia', DE: 'Germany', DO: 'Dominican Republic',
+  DZ: 'Algeria', EE: 'Estonia', ES: 'Spain', FI: 'Finland', FR: 'France', GB: 'United Kingdom', GR: 'Greece',
+  IL: 'Israel', IN: 'India', IR: 'Iran', IT: 'Italy', JP: 'Japan', KR: 'South Korea', LB: 'Lebanon', LU: 'Luxembourg',
+  MA: 'Morocco', MX: 'Mexico', MY: 'Malaysia', NL: 'Netherlands', NZ: 'New Zealand', PH: 'Philippines', PL: 'Poland',
+  PR: 'Puerto Rico', PT: 'Portugal', RO: 'Romania', RU: 'Russia', SE: 'Sweden', SG: 'Singapore', TH: 'Thailand',
+  TR: 'Türkiye', TW: 'Taiwan', UA: 'Ukraine', US: 'United States', VE: 'Venezuela', VN: 'Vietnam', ZA: 'South Africa',
+};
+
+app.get('/api/model-filters', async (_req, res, next) => {
+  try {
+    const [countries, bodies, chests, tags] = await Promise.all([
+      pool.query(`SELECT token AS code, COUNT(*)::int AS count
+        FROM models, regexp_split_to_table(summary_display, ' · ') AS token
+        WHERE token ~ '^[A-Z]{2}$'
+        GROUP BY token ORDER BY count DESC, token ASC`),
+      pool.query(`SELECT profile_meta->>'body' AS value, COUNT(*)::int AS count
+        FROM models WHERE NULLIF(profile_meta->>'body', '') IS NOT NULL
+        GROUP BY value ORDER BY count DESC, value ASC`),
+      pool.query(`SELECT profile_meta->>'chest' AS value FROM models
+        WHERE NULLIF(profile_meta->>'chest', '') IS NOT NULL`),
+      pool.query(`SELECT tag.code, MIN(tag.label) AS label, COUNT(DISTINCT tag.model_id)::int AS count
+        FROM model_tags tag GROUP BY tag.code ORDER BY count DESC, label ASC LIMIT 80`),
+    ]);
+    const cupCounts = new Map();
+    for (const row of chests.rows) {
+      const match = row.value.match(/(?:^|[0-9])([A-Z]{1,3})(?:\s|\(|$)/i);
+      if (match) cupCounts.set(match[1].toUpperCase(), (cupCounts.get(match[1].toUpperCase()) || 0) + 1);
+    }
+    res.json({
+      countries: countries.rows.map(row => ({ value: row.code.toLowerCase(), label: countryNames[row.code] || row.code, count: row.count })),
+      bodyTypes: bodies.rows.map(row => ({ value: row.value, label: row.value, count: row.count })),
+      cupSizes: [...cupCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([value, count]) => ({ value, label: value, count })),
+      tags: tags.rows.map(row => ({ value: row.code, label: row.label, count: row.count })),
+    });
   } catch (error) {
     next(error);
   }
