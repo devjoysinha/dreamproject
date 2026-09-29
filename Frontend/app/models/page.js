@@ -23,6 +23,8 @@ function TagIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d=
 function BodyIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5.5" r="2" /><path d="M8.5 20v-5l1.5-4m5.5 9v-5l-1.5-4M9 9l3 2 3-2M10 15h4" /></svg>; }
 function CupIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h12v5a6 6 0 0 1-12 0V7Zm12 2h1.5a2.5 2.5 0 0 1 0 5H17M8 20h6" /></svg>; }
 function FlameIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.4 3.5c.4 3-1.8 4.4-2.8 6.1-.6-1.3-1.4-2.2-2.6-2.8.2 3.1-3 4.5-3 8.1A6.9 6.9 0 0 0 12 21.5a6.9 6.9 0 0 0 7-6.6c.1-3.2-2-6.1-5.6-11.4Z" /><path d="M12 21.3c-2.1-1.5-2.7-3.3-1.8-5.1.6-1.1 1.5-1.8 2.1-3.1 1.8 1.4 2.7 3 2.6 4.5-.1 1.7-1.1 3-2.9 3.7Z" /></svg>; }
+function SearchIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.2" /><path d="m15.4 15.4 4.2 4.2" /></svg>; }
+function CloseIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>; }
 function Flag() { return <svg className="flag" viewBox="0 0 24 16" aria-hidden="true"><rect width="24" height="16" rx="2" fill="#173b73" /><path d="M0 0 24 16M24 0 0 16" stroke="#fff" strokeWidth="4" /><path d="M0 0 24 16M24 0 0 16" stroke="#c7353b" strokeWidth="1.5" /><path d="M12 0v16M0 8h24" stroke="#fff" strokeWidth="5" /><path d="M12 0v16M0 8h24" stroke="#c7353b" strokeWidth="2" /></svg>; }
 
 function slugify(value) { return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'model'; }
@@ -34,8 +36,8 @@ function fallbackCards() {
 }
 function initialParam(name) { return typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get(name) || ''; }
 function initialSort() { const value = initialParam('sort'); return sorts.some(([key]) => key === value) ? value : 'hot'; }
-function countryFromSummary(summary = '') { return summary.match(/\b(?:US|CA|UA|AL|GB|AU|DE|FR|IN|BR)\b/g)?.[0]?.toLowerCase() || ''; }
-function CountryFlag({ summary }) { const country = countryFromSummary(summary); if (!country) return null; return <span className={`country-flag country-${country}`} aria-label={country.toUpperCase()}><small>{country.toUpperCase()}</small></span>; }
+function countryFromSummary(summary = '') { return summary.match(/\b[A-Z]{2}\b/)?.[0] || ''; }
+function CountryFlag({ summary }) { const country = countryFromSummary(summary); if (!country) return null; const flag = String.fromCodePoint(...[...country].map(letter => 127397 + letter.charCodeAt(0))); return <span className="country-flag" role="img" aria-label={`${country} flag`}>{flag}</span>; }
 
 function Sidebar() {
   return <aside className="sidebar models-sidebar">
@@ -67,7 +69,7 @@ export default function ModelsPage() {
   const [creators, setCreators] = useState(fallback);
   const [total, setTotal] = useState(fallback.length);
   const [saved, setSaved] = useState([]);
-  const [showFilters, setShowFilters] = useState(true);
+  const [showFilters, setShowFilters] = useState(() => Boolean(initialParam('ethnicity') || initialParam('country') || initialParam('tag') || initialParam('bodyType') || initialParam('cupSize')));
   const [openFilter, setOpenFilter] = useState(null);
   const [sort, setSort] = useState(initialSort);
   const [queryDraft, setQueryDraft] = useState(() => initialParam('query'));
@@ -131,6 +133,7 @@ export default function ModelsPage() {
   };
   const submitSearch = event => { event.preventDefault(); setQuery(queryDraft.trim()); };
   const clearFilters = () => { setEthnicity(''); setCountry(''); setTag(''); setBodyType(''); setCupSize(''); setSort('hot'); setOpenFilter(null); };
+  const clearSearch = () => { setQueryDraft(''); setQuery(''); };
   const loadMore = async () => {
     setIsLoadingMore(true);
     try {
@@ -146,7 +149,7 @@ export default function ModelsPage() {
     <Sidebar />
     <MobileNav active="models" />
     <main className="models-main" id="main-content">
-      <header className="models-header"><div><p className="eyebrow">— Models</p><h1>{total.toLocaleString()} <span>creators</span></h1></div><form className="models-search" onSubmit={submitSearch}><input value={queryDraft} onChange={event => setQueryDraft(event.target.value)} placeholder="Search models" aria-label="Search models" /><button type="submit">Search</button></form><div className="filter-control"><button className="filters-button" type="button" aria-expanded={showFilters} onClick={() => { setShowFilters(open => !open); setOpenFilter(null); }}><FilterIcon />Filters{activeFilterCount ? ` · ${activeFilterCount} active` : ''}</button></div></header>
+      <header className="models-header"><div><p className="eyebrow">— Models</p><h1>{total.toLocaleString()} <span>creators</span></h1></div><form className={`models-search${query ? ' has-query' : ''}`} onSubmit={submitSearch}><SearchIcon /><input value={queryDraft} onChange={event => setQueryDraft(event.target.value)} placeholder="Search models" aria-label="Search models" />{queryDraft && <button className="models-search-clear" type="button" onClick={clearSearch} aria-label="Clear model search"><CloseIcon /></button>}<button className="models-search-submit" type="submit">Search</button></form><div className="filter-control"><button className="filters-button" type="button" aria-expanded={showFilters} onClick={() => { setShowFilters(open => !open); setOpenFilter(null); }}><FilterIcon />Filters{activeFilterCount ? ` · ${activeFilterCount} active` : ''}</button></div></header>
       {showFilters && <section className="model-filter-panel" aria-label="Model filters"><div className="model-filter-row">
         <DropdownFilter label="Ethnicity" value={ethnicity} placeholder="Ethnicity" options={filterOptionsWithAll.ethnicity} icon={FilterIcon} open={openFilter === 'ethnicity'} onToggle={() => setOpenFilter(openFilter === 'ethnicity' ? null : 'ethnicity')} onSelect={value => chooseFilter('ethnicity', value)} />
         <DropdownFilter label="Country" value={country} placeholder="Select country" options={filterOptionsWithAll.countries} icon={GlobeIcon} open={openFilter === 'country'} onToggle={() => setOpenFilter(openFilter === 'country' ? null : 'country')} onSelect={value => chooseFilter('country', value)} />

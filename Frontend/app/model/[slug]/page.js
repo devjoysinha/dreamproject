@@ -26,10 +26,38 @@ function DetailSidebar() {
 }
 
 function stats(link) { return [link.sizeDisplay || '—', `${link.images || 0} imgs`, `${link.videos || 0} videos`, link.relativeAge].filter(Boolean).join(' · '); }
+function profileSlug(value = '') { return decodeURIComponent(value).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''); }
+const metaOrder = ['aliases', 'born', 'age', 'race', 'hair', 'eyes', 'body', 'chest', 'height', 'weight', 'orient.'];
+const metaLabels = { aliases: 'Aliases', born: 'Born', age: 'Age', race: 'Race', hair: 'Hair', eyes: 'Eyes', body: 'Body', chest: 'Cup size', height: 'Height', weight: 'Weight', 'orient.': 'Orientation' };
+const socialLabels = { instagram: 'Instagram', tiktok: 'TikTok', onlyfans: 'OnlyFans', 'of free': 'OF Free', fansly: 'Fansly', twitter: 'X / Twitter', x: 'X' };
+const socialOrder = ['instagram', 'tiktok', 'onlyfans', 'of free', 'fansly'];
+const tagOrder = ['PROFESSION_MODEL', 'PROFESSION_COSPLAYER', 'PROFESSION_GAMER', 'PROFESSION_SEX_THERAPIST', 'CATEGORY_MASTURBATION', 'CATEGORY_DILDO', 'CATEGORY_DILDO_BLOWJOB', 'CATEGORY_BLOWJOB', 'CATEGORY_VAGINAL', 'CATEGORY_ANAL', 'CATEGORY_CREAMPIE', 'CATEGORY_INTERRACIAL', 'CATEGORY_FAN_FUCK'];
+function countryEmoji(summary = '') {
+  const code = summary.match(/\b([A-Z]{2})\b/)?.[1] || '';
+  return code.length === 2 ? String.fromCodePoint(...[...code].map(letter => 127397 + letter.charCodeAt(0))) : '';
+}
+function CountryFlag({ summary }) {
+  const flag = countryEmoji(summary);
+  return flag ? <span className="profile-country-flag" role="img" aria-label={`${summary.match(/\b([A-Z]{2})\b/)?.[1]} flag`}>{flag}</span> : null;
+}
+function socialLabel(key) { return socialLabels[key.toLowerCase()] || key.replace(/\b\w/g, letter => letter.toUpperCase()); }
+function orderedSocialLinks(socialLinks = {}) {
+  const keys = Object.keys(socialLinks);
+  return [...socialOrder.filter(key => socialLinks[key]), ...keys.filter(key => !socialOrder.includes(key))].map(key => [key, socialLinks[key]]);
+}
+function orderedTags(tags = []) {
+  return [...tags].sort((left, right) => {
+    const leftIndex = tagOrder.indexOf(left.code);
+    const rightIndex = tagOrder.indexOf(right.code);
+    if (leftIndex !== -1 || rightIndex !== -1) return (leftIndex === -1 ? tagOrder.length : leftIndex) - (rightIndex === -1 ? tagOrder.length : rightIndex);
+    return left.label.localeCompare(right.label);
+  });
+}
 
 export default function ModelDetailPage() {
   const params = useParams();
   const slug = Array.isArray(params.slug) ? params.slug[0] : params.slug;
+  const lookupSlug = profileSlug(slug);
   const [model, setModel] = useState(null);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -38,24 +66,24 @@ export default function ModelDetailPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`${apiBase}/api/models/${encodeURIComponent(slug)}?limit=24`, { signal: controller.signal })
+    fetch(`${apiBase}/api/models/${encodeURIComponent(lookupSlug)}?limit=24`, { signal: controller.signal })
       .then(response => response.ok ? response.json() : Promise.reject(new Error(response.status === 404 ? 'This profile has not been imported yet.' : 'Profile unavailable.')))
       .then(setModel)
       .catch(fetchError => { if (fetchError.name !== 'AbortError') setError(fetchError.message); });
     return () => controller.abort();
-  }, [slug]);
+  }, [lookupSlug]);
   useEffect(() => {
     try {
       const stored = JSON.parse(window.localStorage.getItem('leakporns-saved-models') || '[]');
-      setSaved(Array.isArray(stored) && stored.includes(slug));
+      setSaved(Array.isArray(stored) && stored.includes(lookupSlug));
     } catch { /* local storage is optional */ }
-  }, [slug]);
+  }, [lookupSlug]);
 
   const toggleSaved = () => {
     setSaved(value => {
       try {
         const stored = JSON.parse(window.localStorage.getItem('leakporns-saved-models') || '[]');
-        const next = value ? stored.filter(item => item !== slug) : [...new Set([...stored, slug])];
+        const next = value ? stored.filter(item => item !== lookupSlug) : [...new Set([...stored, lookupSlug])];
         window.localStorage.setItem('leakporns-saved-models', JSON.stringify(next));
       } catch { /* local storage is optional */ }
       return !value;
@@ -72,5 +100,26 @@ export default function ModelDetailPage() {
     window.setTimeout(() => setShareStatus(''), 2200);
   };
 
-  return <div className="site-shell detail-shell"><DetailSidebar /><MobileNav active="models" /><main className="detail-main"><header className="detail-top"><form className="detail-search" action="/models"><span><Icon name="search" /></span><input name="query" defaultValue={model?.name || ''} placeholder="Search & Filter" aria-label="Search models" /><button type="submit" aria-label="Search visually"><Icon name="scan" /></button><i /><b><Icon name="clock" /> New</b></form><a className="detail-models-link" href="/models"><Icon name="users" />Models</a></header>{error && <section className="detail-message"><h1>Model catalogue is ready to connect</h1><p>{error} Run the backend migration and importer, then reload this profile.</p><a href="/models">Return to models</a></section>}{!model && !error && <section className="detail-message"><p>Loading creator profile…</p></section>}{model && <section className="detail-layout"><aside className="profile-column"><article className="profile-hero"><img src={model.profileImageUrl} alt={`${model.name} profile`} /><div /><h1>{model.name}</h1><p>{model.summaryDisplay}</p></article><div className="profile-actions"><button type="button" aria-pressed={saved} aria-label={saved ? 'Remove saved profile' : 'Save profile'} onClick={toggleSaved}><Icon name="bookmark" /></button><button type="button" onClick={shareProfile}><Icon name="share" />Share</button><a href="/models"><Icon name="grid" />All Models</a>{shareStatus && <span className="share-status" aria-live="polite">{shareStatus}</span>}</div><section className="profile-bio"><p className="eyebrow">— Bio</p><p>{model.bio || 'No biography is available for this creator yet.'}</p>{Object.entries(model.profileMeta || {}).slice(0, 5).map(([key, value]) => <span key={key}><b>{key}</b>{value}</span>)}</section></aside><section className="detail-media" aria-label={`${model.name} open links`}>{model.openLinks.map(link => { const openHref = link.megaUrl || '/models'; return <article className="detail-media-card" key={`${link.contentId}-${link.position}`}><img src={link.imageUrl} alt={link.title} loading="lazy" />{link.isTrending && <span className="trending">Trending</span>}<button type="button" className="card-more" aria-label={`More actions for ${link.title}`} onClick={() => setSelectedLink(link)}><Icon name="more" /></button><div className="detail-card-copy"><h2>{link.title}</h2><p>{stats(link)}</p><div><a href={openHref} target={link.megaUrl ? '_blank' : undefined} rel={link.megaUrl ? 'noreferrer' : undefined}><Icon name="link" />Open Link</a><button type="button" aria-label={`Add ${link.title}`} onClick={() => setSelectedLink(link)}><Icon name="plus" /></button></div></div></article>; })}</section></section>}</main>{selectedLink && <div className="info-layer" role="presentation" onClick={() => setSelectedLink(null)}><section className="info-dialog" role="dialog" aria-modal="true" aria-labelledby="detail-link-title" onClick={event => event.stopPropagation()}><button className="dialog-close" type="button" aria-label="Close details" onClick={() => setSelectedLink(null)}>×</button><p className="eyebrow">— Open link</p><h2 id="detail-link-title">{selectedLink.title}</h2><p className="info-model">{model.name}</p><dl><div><dt>Images</dt><dd>{selectedLink.images || 0}</dd></div><div><dt>Videos</dt><dd>{selectedLink.videos || 0}</dd></div><div><dt>Size</dt><dd>{selectedLink.sizeDisplay || '—'}</dd></div></dl><div className="info-actions"><a href={selectedLink.megaUrl || '/models'} target={selectedLink.megaUrl ? '_blank' : undefined} rel={selectedLink.megaUrl ? 'noreferrer' : undefined}>Open link</a></div></section></div>}</div>;
+  return <div className="site-shell detail-shell">
+    <DetailSidebar /><MobileNav active="models" />
+    <main className="detail-main">
+      <header className="detail-top"><form className="detail-search" action="/models"><span><Icon name="search" /></span><input name="query" defaultValue={model?.name || ''} placeholder="Search models" aria-label="Search models" /><button type="submit" aria-label="Search visually"><Icon name="scan" /></button><i /><b><Icon name="clock" /> New</b></form><a className="detail-models-link" href="/models"><Icon name="users" />Models</a></header>
+      {error && <section className="detail-message"><h1>Model catalogue is ready to connect</h1><p>{error} Run the backend migration and importer, then reload this profile.</p><a href="/models">Return to models</a></section>}
+      {!model && !error && <section className="detail-message"><p>Loading creator profile…</p></section>}
+      {model && <section className="detail-layout">
+        <aside className="profile-column">
+          <article className="profile-hero"><img src={model.profileImageUrl || '/7035402.svg'} alt={`${model.name} profile`} /><div /><h1>{model.name}</h1><p><CountryFlag summary={model.summaryDisplay} />{model.summaryDisplay}</p></article>
+          <div className="profile-actions"><button type="button" aria-pressed={saved} aria-label={saved ? 'Remove saved profile' : 'Save profile'} onClick={toggleSaved}><Icon name="bookmark" /></button><button type="button" onClick={shareProfile}><Icon name="share" />Share</button><a href="/models"><Icon name="grid" />All Models</a>{shareStatus && <span className="share-status" aria-live="polite">{shareStatus}</span>}</div>
+          <section className="profile-bio">
+            <section className="profile-section"><p className="eyebrow">— Bio</p><p>{model.bio || 'No biography is available for this creator yet.'}</p></section>
+            {Object.keys(model.socialLinks || {}).length > 0 && <section className="profile-section profile-social"><p className="eyebrow">— Social links</p><div>{orderedSocialLinks(model.socialLinks).map(([key, value]) => <a key={key} href={value} target="_blank" rel="noreferrer"><span>{socialLabel(key)}</span><small>{value.replace(/^https?:\/\//, '').replace(/\/$/, '')}</small></a>)}</div></section>}
+            {model.tags?.length > 0 && <section className="profile-section profile-tags"><p className="eyebrow">— Tags</p><div>{orderedTags(model.tags).map(tag => <a key={tag.code} href={`/models?tag=${encodeURIComponent(tag.code)}`}>#{tag.label}</a>)}</div></section>}
+            {Object.keys(model.profileMeta || {}).length > 0 && <section className="profile-section profile-meta"><p className="eyebrow">— Meta</p><div>{metaOrder.filter(key => model.profileMeta[key]).concat(Object.keys(model.profileMeta || {}).filter(key => !metaOrder.includes(key))).map(key => <span key={key}><b>{metaLabels[key] || key}</b><strong>{model.profileMeta[key]}</strong></span>)}</div></section>}
+          </section>
+        </aside>
+        <section className="detail-media" aria-label={`${model.name} open links`}>{model.openLinks.map(link => { const openHref = link.megaUrl || '/models'; return <article className="detail-media-card" key={`${link.contentId}-${link.position}`}><img src={link.imageUrl || '/7035402.svg'} alt={link.title} loading="lazy" />{link.isTrending && <span className="trending">Trending</span>}<button type="button" className="card-more" aria-label={`More actions for ${link.title}`} onClick={() => setSelectedLink(link)}><Icon name="more" /></button><div className="detail-card-copy"><h2>{link.title}</h2><p>{stats(link)}</p><div><a href={openHref} target={link.megaUrl ? '_blank' : undefined} rel={link.megaUrl ? 'noreferrer' : undefined}><Icon name="link" />Open Link</a><button type="button" aria-label={`Add ${link.title}`} onClick={() => setSelectedLink(link)}><Icon name="plus" /></button></div></div></article>; })}</section>
+      </section>}
+    </main>
+    {selectedLink && <div className="info-layer" role="presentation" onClick={() => setSelectedLink(null)}><section className="info-dialog" role="dialog" aria-modal="true" aria-labelledby="detail-link-title" onClick={event => event.stopPropagation()}><button className="dialog-close" type="button" aria-label="Close details" onClick={() => setSelectedLink(null)}>×</button><p className="eyebrow">— Open link</p><h2 id="detail-link-title">{selectedLink.title}</h2><p className="info-model">{model.name}</p><dl><div><dt>Images</dt><dd>{selectedLink.images || 0}</dd></div><div><dt>Videos</dt><dd>{selectedLink.videos || 0}</dd></div><div><dt>Size</dt><dd>{selectedLink.sizeDisplay || '—'}</dd></div></dl><div className="info-actions"><a href={selectedLink.megaUrl || '/models'} target={selectedLink.megaUrl ? '_blank' : undefined} rel={selectedLink.megaUrl ? 'noreferrer' : undefined}>Open link</a></div></section></div>}
+  </div>;
 }
