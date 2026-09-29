@@ -1,6 +1,9 @@
 import './globals.css';
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://leakporns.com';
+
 export const metadata = {
+  metadataBase: new URL(siteUrl),
   title: 'Leakporns — Library',
   description: 'Creator media library',
   icons: {
