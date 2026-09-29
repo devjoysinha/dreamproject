@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import content from '../../content.json';
+import MobileNav from '../components/MobileNav';
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
 const sorts = [['newest', 'Newest'], ['name', 'A–Z'], ['links', 'Most links']];
@@ -86,6 +87,7 @@ export default function ModelsPage() {
 
   return <div className="site-shell models-shell">
     <Sidebar />
+    <MobileNav active="models" />
     <main className="models-main" id="main-content">
       <header className="models-header"><div><p className="eyebrow">— Models</p><h1>{total.toLocaleString()} <span>creators</span></h1></div><div className="filter-control"><button className="filters-button" type="button" aria-expanded={showFilters} onClick={() => setShowFilters(open => !open)}><FilterIcon />Filters</button>{showFilters && <div className="filters-popover" role="dialog" aria-label="Catalogue order"><p>Order models</p><div>{sorts.map(([value, label]) => <button key={value} className={sort === value ? 'active' : ''} onClick={() => chooseSort(value)} type="button">{label}</button>)}</div></div>}</div></header>
       <p className="models-status" aria-live="polite">{isLoading ? 'Loading model catalogue…' : `Sorted by ${activeSort}`}</p>

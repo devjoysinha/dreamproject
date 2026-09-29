@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import content from '../content.json';
+import MobileNav from './components/MobileNav';
 
 const formatSize = bytes => {
   if (bytes < 1_000_000) return `${Math.max(1, Math.round(bytes / 1_000))} KB`;
@@ -46,6 +47,7 @@ export default function Home() {
       <button className="balance" aria-label="Open balance details"><KeyIcon/><span>2</span><i/><PlusIcon/></button>
       <div className="account-chip"><span className="notice">3</span><span className="profile">LS</span><div><b>Sign in</b><small>Guest</small></div></div>
     </aside>
+    <MobileNav active="browse" />
     <main id="top" className="main-content">
       <section className="top-strip">
         <div className="search-panel"><div className="search-row"><div className="search-input"><span className="search-icon-box"><SearchIcon/></span><input value={query} onChange={e => { setQuery(e.target.value); setVisibleCount(12); }} placeholder="Search & Filter" aria-label="Search and filter"/><a className="visual-search" href="#visual-search" aria-label="Visual search"><ScanEyeIcon/></a></div><button className="sort" aria-label="Sort results"><ClockIcon/><span>New</span><Chevron/></button></div></div>
