@@ -39,7 +39,7 @@ export default function Home() {
   const visibleList = list.slice(0, visibleCount);
   return <div className="site-shell">
     <aside className="sidebar">
-      <a className="brand" href="#top"><img src="/7035402.svg" alt="LeaksHaven logo"/><span>leaks<b>haven</b></span></a>
+      <a className="brand" href="#top"><img src="/7035402.svg" alt="Leakporns logo"/><span>leak<b>porns</b></span></a>
       <nav className="primary-nav"><p>— Menu</p><a className="selected" href="#top"><NavIcon type="browse"/>Browse</a><a href="#studio"><NavIcon type="studio"/>Studio</a><a href="#chat"><NavIcon type="chat"/>Chat</a><a href="#account"><NavIcon type="account"/>Account</a></nav>
       <nav className="library-nav"><p>— Library</p><a href="#lists"><NavIcon type="lists"/>My Lists</a><a href="/models"><NavIcon type="models"/>Models</a><a href="#shop"><NavIcon type="shop"/>Shop</a><a href="#rewards"><NavIcon type="rewards"/>Rewards</a></nav>
       <div className="sidebar-tail"><button className="support"><span className="support-dot"/>Support-Chat</button><button className="locale"><Flag/> English <Chevron/></button></div>

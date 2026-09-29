@@ -14,7 +14,7 @@
 
 /* Shared shell refinements matched to the live reference. */
 .brand{display:flex;align-items:center;gap:11px;width:auto;height:40px;margin:0 8px 4px;color:#f5f2ee;font-size:0;line-height:1;letter-spacing:0}
-.brand img{display:block;width:36px;height:36px;border-radius:9px;object-fit:contain}
+.brand img{display:block;width:20px;height:20px;border-radius:0;object-fit:contain;background:transparent}
 .brand>span{display:inline-flex;align-items:baseline;color:#f5f2ee;font-size:17px;font-weight:650;letter-spacing:-.65px;line-height:1}
 .brand>span b{display:inline;color:#df6554;font:inherit}
 .sidebar nav a{position:relative}
@@ -34,7 +34,7 @@
 .sort>svg:first-child{width:15px;height:15px;color:#9d9490}.sort>svg:last-child{width:12px;height:12px;color:#817873}
 .models-link{top:27px;right:32px;display:flex;align-items:center;gap:7px;height:34px;padding:0 11px;border:1px solid rgba(255,255,255,.09);border-radius:10px;background:rgba(255,255,255,.045);backdrop-filter:blur(16px);color:#ddd6d2;font-family:'DM Mono',monospace;font-size:9px;font-weight:500;letter-spacing:.4px;text-transform:uppercase}
 .models-link svg{width:15px;height:15px;fill:none;stroke:#9f9691;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
-@media(max-width:760px){.top-strip{padding:16px 0 46px}.models-link{top:78px;right:2px}.brand img{width:34px;height:34px}}
+@media(max-width:760px){.top-strip{padding:16px 0 46px}.models-link{top:78px;right:2px}.brand img{width:20px;height:20px}}
 
 /* Responsive geometry from the live site: fluid container, 4:5 media, auto details. */
 .main-content{margin-left:272px;margin-right:16px}
@@ -54,7 +54,7 @@
 /* The reference rail is a 208px glass panel with 16px of inner padding. */
 .sidebar{padding:32px;gap:24px}
 .brand{flex:0 0 auto;width:auto;height:44px;margin:-4px;padding-inline:4px;gap:12px}
-.brand img{width:36px;height:36px}
+.brand img{width:20px;height:20px}
 .sidebar nav{gap:4px}
 .sidebar nav p{margin:0 8px 5px}
 .sidebar nav a{height:40px;padding:0 8px}

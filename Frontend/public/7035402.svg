@@ -12,8 +12,11 @@
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
    xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs1" />
+  <defs id="defs1">
+    <filter id="transparentBackground" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  4 -4 0 0 -0.1" />
+    </filter>
+  </defs>
   <sodipodi:namedview
      id="namedview1"
      pagecolor="#ffffff"
@@ -33,10 +36,11 @@
        margin="0"
        bleed="0" />
   </sodipodi:namedview>
-  <g
-     id="g1"
-     inkscape:groupmode="layer"
-     inkscape:label="1">
+    <g
+      id="g1"
+      inkscape:groupmode="layer"
+      inkscape:label="1"
+      filter="url(#transparentBackground)">
     <g
        id="group-R5">
       <path

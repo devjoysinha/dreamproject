@@ -1,5 +1,5 @@
 export const metadata = {
-  title: 'Browse All Models - OnlyFans Leaks - Leakshaven',
+  title: 'Browse All Models - OnlyFans Leaks - Leakporns',
   description: 'Browse featured creator profiles.',
 };
 

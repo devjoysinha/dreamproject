@@ -1,5 +1,5 @@
 export const metadata = {
-  title: 'Creator profile - Leakshaven',
+  title: 'Creator profile - Leakporns',
   description: 'Creator profile and available media catalogue.',
 };
 
