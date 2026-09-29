@@ -14,3 +14,5 @@ Frontend/.next/
 # OS and editor files
 .DS_Store
 .vscode/
+__pycache__/
+*.pyc

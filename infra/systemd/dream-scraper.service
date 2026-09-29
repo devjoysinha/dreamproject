@@ -1,0 +1,21 @@
+[Unit]
+Description=Leakporns root-feed scraper
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/opt/dreamproject/Scarper
+EnvironmentFile=/opt/dreamproject/Scarper/.env
+RuntimeDirectory=dream-scraper
+RuntimeDirectoryMode=0750
+ExecStart=/usr/bin/flock -n /run/dream-scraper/scraper.lock /opt/dreamproject/Scarper/.venv/bin/python /opt/dreamproject/Scarper/leakshaven_root_scraper.py
+TimeoutStartSec=4min30s
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -57,7 +57,7 @@ function openLinksOrdering(sort) {
   return {
     newest: 'item.created_at DESC NULLS LAST, item.title ASC',
     trending: 'item.is_trending DESC, item.created_at DESC NULLS LAST, item.title ASC',
-    name: 'm.name ASC, item.created_at DESC NULLS LAST',
+    name: 'm.name ASC NULLS LAST, item.created_at DESC NULLS LAST',
   }[sort];
 }
 
@@ -111,7 +111,18 @@ app.get('/api/open-links', async (req, res, next) => {
   }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   values.push(query.limit, query.offset);
-  const from = 'FROM media_items item JOIN model_open_links relation ON relation.content_id = item.content_id JOIN models m ON m.id = relation.model_id';
+  // A root-feed item is still a valid listing when its title cannot be matched to a
+  // creator. Select one deterministic creator for cards that do have associations,
+  // rather than duplicating a card when an item is associated with several models.
+  const from = `FROM media_items item
+    LEFT JOIN LATERAL (
+      SELECT model.slug, model.name, model.source_query, model.summary_display, model.profile_meta
+      FROM model_open_links relation
+      JOIN models model ON model.id = relation.model_id
+      WHERE relation.content_id = item.content_id
+      ORDER BY relation.position ASC, model.name ASC
+      LIMIT 1
+    ) m ON TRUE`;
   const sql = `SELECT item.content_id AS id, item.short_code AS "shortCode", item.title, item.image_url AS "imageUrl", item.image_count AS images, item.video_count AS videos, item.size_bytes AS "sizeBytes", item.size_display AS "sizeDisplay", item.created_at AS "createdAt", item.relative_age AS "relativeAge", item.is_trending AS "isTrending", item.is_premium AS "isPremium", item.mega_url AS "megaUrl", item.status, m.slug AS "modelSlug", m.name AS "modelName" ${from} ${where} ORDER BY ${openLinksOrdering(query.sort)} LIMIT $${values.length - 1} OFFSET $${values.length}`;
   const totalSql = `SELECT COUNT(*)::int AS total ${from} ${where}`;
   try {

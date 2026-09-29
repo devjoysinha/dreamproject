@@ -63,7 +63,7 @@ function Sidebar() {
   </aside>;
 }
 
-function toCard(item) { return { ...item, imageUrl: item.imageUrl || item.media, images: item.images || 0, videos: item.videos || 0 }; }
+function toCard(item) { return { ...item, imageUrl: item.imageUrl || item.media || '/7035402.svg', images: item.images || 0, videos: item.videos || 0 }; }
 
 export default function Home() {
   const fallback = useMemo(fallbackCards, []);
