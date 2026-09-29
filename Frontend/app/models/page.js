@@ -20,7 +20,7 @@ function Flag() { return <svg className="flag" viewBox="0 0 24 16" aria-hidden="
 
 function slugify(value) { return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'model'; }
 function fallbackCards() {
-  return content.items.filter(item => !item.deleted).map(item => ({
+  return content.items.filter(item => !item.deleted && ((item.info?.images || 0) + (item.info?.videos || 0) > 0)).map(item => ({
     id: item.id, slug: slugify(item.title), name: item.title, sourceQuery: item.title, profileImageUrl: item.previewMedia || item.media,
     summaryDisplay: '', openLinkCount: (item.info.images || 0) + (item.info.videos || 0), trendingCount: item.isTrending ? 1 : 0,
   }));

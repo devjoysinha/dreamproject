@@ -74,10 +74,12 @@ app.get('/api/models', async (req, res, next) => {
     values.push(query.tag);
     filters.push(`EXISTS (SELECT 1 FROM model_tags filter_tag WHERE filter_tag.model_id = m.id AND filter_tag.code = $${values.length})`);
   }
+  // The models directory should only expose profiles that have usable open-link data.
+  filters.push('link_counts.open_link_count > 0');
   values.push(query.limit, query.offset);
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   const sql = `SELECT ${cardFields} FROM models m ${cardJoins} ${where} ORDER BY ${ordering(query.sort)} LIMIT $${values.length - 1} OFFSET $${values.length}`;
-  const totalSql = `SELECT COUNT(*)::int AS total FROM models m ${where}`;
+  const totalSql = `SELECT COUNT(*)::int AS total FROM models m ${cardJoins} ${where}`;
   try {
     const [items, total] = await Promise.all([
       pool.query(sql, values),
