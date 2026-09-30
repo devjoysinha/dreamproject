@@ -138,9 +138,9 @@ def load_config() -> Config:
         telegram_chat_id=chat_id,
         notify_every_run=env_bool("TELEGRAM_NOTIFY_EVERY_RUN", True),
         root_count=env_int("LEAKSHAVEN_ROOT_COUNT", 30, 1, 30),
-        max_resolves=env_int("MAX_RESOLVES_PER_RUN", 4, 1, 12),
+        max_resolves=env_int("MAX_RESOLVES_PER_RUN", 8, 1, 12),
         request_timeout=env_int("REQUEST_TIMEOUT_SECONDS", 45, 10, 120),
-        redirect_timeout=env_int("REDIRECT_TIMEOUT_SECONDS", 70, 15, 180),
+        redirect_timeout=env_int("REDIRECT_TIMEOUT_SECONDS", 120, 15, 180),
         asset_bucket=os.getenv("ASSET_BUCKET", "dreamproject-profile-images").strip(),
         asset_region=os.getenv("ASSET_REGION", "us-east-1").strip(),
         asset_prefix=os.getenv("ASSET_PREFIX", "root-feed").strip("/"),
@@ -535,21 +535,32 @@ def pending_content_ids(
     limit: int,
     preferred_ids: Sequence[str] = (),
 ) -> List[str]:
+    # Root scraping is intentionally scoped to the current feed window. Older
+    # model-import backlog must not consume the redirect budget of this job.
+    if not preferred_ids:
+        return []
     with connection.cursor() as cursor:
         cursor.execute(
             """SELECT content_id FROM media_items
                WHERE mega_url IS NULL AND is_premium = FALSE AND status = 'pending'
-               ORDER BY CASE WHEN content_id = ANY(%s) THEN 0 ELSE 1 END,
-                        created_at DESC NULLS LAST, updated_at ASC
+                 AND content_id = ANY(%s)
+               ORDER BY created_at DESC NULLS LAST, updated_at ASC
                LIMIT %s""",
             (list(preferred_ids), limit),
         )
         return [row[0] for row in cursor.fetchall()]
 
 
-def pending_content_count(connection: psycopg.Connection[Any]) -> int:
+def pending_content_count(connection: psycopg.Connection[Any], content_ids: Sequence[str]) -> int:
+    if not content_ids:
+        return 0
     with connection.cursor() as cursor:
-        cursor.execute("SELECT COUNT(*) FROM media_items WHERE mega_url IS NULL AND is_premium = FALSE AND status = 'pending'")
+        cursor.execute(
+            """SELECT COUNT(*) FROM media_items
+               WHERE mega_url IS NULL AND is_premium = FALSE AND status = 'pending'
+                 AND content_id = ANY(%s)""",
+            (list(content_ids),),
+        )
         return int(cursor.fetchone()[0])
 
 
@@ -705,7 +716,7 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                 LOGGER.info("Resolving %s pending direct links.", len(pending_ids))
                 resolved, _unresolved = resolve_batch(context, page, pending_ids, config.redirect_timeout) if pending_ids else ({}, 0)
                 stats["resolved"] = mark_resolved(connection, resolved)
-                stats["pending"] = pending_content_count(connection)
+                stats["pending"] = pending_content_count(connection, [item["content_id"] for item in records])
             else:
                 stats["associations"] = sum(len(value) for value in associations.values())
         duration = time.monotonic() - started
