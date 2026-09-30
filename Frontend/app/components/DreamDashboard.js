@@ -31,7 +31,7 @@ function initials(value = '') {
 
 function formatCount(value) { return Number(value || 0).toLocaleString(); }
 
-function DashboardBrand() {
+export function DashboardBrand() {
   return <Link href="/discover" className={styles.brand} aria-label="Dreamproject Discover home"><span className={styles.brandMark}><span>D</span><i /></span><span>Dream<span>project</span></span></Link>;
 }
 
@@ -41,7 +41,7 @@ const navGroups = [
   ['Other', [['Upgrade', 'crown', '/upgrade'], ['Rewards', 'gift']]],
 ];
 
-function DashboardSidebar({ active, savedCount, onUnavailable, mobileOpen, onClose }) {
+export function DashboardSidebar({ active, savedCount, onUnavailable, mobileOpen, onClose }) {
   const item = ([label, icon, href]) => href ? <Link key={label} href={href} className={active === label ? styles.activeNav : ''}><DashboardIcon name={icon} /><span>{label}</span>{label === 'Upgrade' && <b>Pro</b>}{label === 'Favorites' && savedCount ? <em>{savedCount}</em> : null}</Link> : <button key={label} type="button" onClick={() => onUnavailable(`${label} is coming soon.`)}><DashboardIcon name={icon} /><span>{label}</span>{label === 'Favorites' && savedCount ? <em>{savedCount}</em> : null}</button>;
   return <>
     <aside className={`${styles.sidebar}${mobileOpen ? ` ${styles.sidebarOpen}` : ''}`} aria-label="Dreamproject navigation">
@@ -56,15 +56,15 @@ function DashboardSidebar({ active, savedCount, onUnavailable, mobileOpen, onClo
 function CreatorCard({ creator, saved, onSave, onPreview }) {
   const isTrending = Number(creator.trendingCount) > 0;
   return <article className={styles.creatorCard}>
-    <Link href={`/model/${encodeURIComponent(creator.slug)}`} className={styles.creatorMedia} aria-label={`Open ${creator.name}'s profile`}><img src={creator.profileImageUrl || '/7035402.svg'} alt={`${creator.name} creator profile`} loading="lazy" /><span className={`${styles.contentBadge}${isTrending ? ` ${styles.trendingBadge}` : ''}`}>{isTrending ? 'Trending' : 'Creator'}</span><span className={styles.mediaShade} /><span className={styles.cardIdentity}><i>{initials(creator.name)}</i><span><strong>{creator.name}</strong>{isTrending && <DashboardIcon name="check" size={14} />}<small>{creator.summaryDisplay || 'Creator profile'}</small></span></span></Link>
+    <Link href={`/creator/${encodeURIComponent(creator.slug)}`} className={styles.creatorMedia} aria-label={`Open ${creator.name}'s profile`}><img src={creator.profileImageUrl || '/7035402.svg'} alt={`${creator.name} creator profile`} loading="lazy" /><span className={`${styles.contentBadge}${isTrending ? ` ${styles.trendingBadge}` : ''}`}>{isTrending ? 'Trending' : 'Creator'}</span><span className={styles.mediaShade} /><span className={styles.cardIdentity}><i>{initials(creator.name)}</i><span><strong>{creator.name}</strong>{isTrending && <DashboardIcon name="check" size={14} />}<small>{creator.summaryDisplay || 'Creator profile'}</small></span></span></Link>
     <button type="button" className={styles.cardMenu} onClick={() => onPreview(creator)} aria-label={`Preview ${creator.name}`}><DashboardIcon name="more" /></button>
-    <div className={styles.creatorBody}><dl><div><DashboardIcon name="database" size={14} /><dt>Links</dt><dd>{formatCount(creator.openLinkCount)}</dd></div><div><DashboardIcon name="spark" size={14} /><dt>Trending</dt><dd>{formatCount(creator.trendingCount)}</dd></div></dl><div className={styles.cardActions}><Link href={`/model/${encodeURIComponent(creator.slug)}`}>View profile <DashboardIcon name="arrow" size={15} /></Link><button type="button" aria-label={`${saved ? 'Remove' : 'Save'} ${creator.name}`} aria-pressed={saved} onClick={() => onSave(creator.id)}><DashboardIcon name="bookmark" size={17} className={saved ? styles.savedIcon : ''} /></button></div></div>
+    <div className={styles.creatorBody}><dl><div><DashboardIcon name="database" size={14} /><dt>Links</dt><dd>{formatCount(creator.openLinkCount)}</dd></div><div><DashboardIcon name="spark" size={14} /><dt>Trending</dt><dd>{formatCount(creator.trendingCount)}</dd></div></dl><div className={styles.cardActions}><Link href={`/creator/${encodeURIComponent(creator.slug)}`}>View profile <DashboardIcon name="arrow" size={15} /></Link><button type="button" aria-label={`${saved ? 'Remove' : 'Save'} ${creator.name}`} aria-pressed={saved} onClick={() => onSave(creator.id)}><DashboardIcon name="bookmark" size={17} className={saved ? styles.savedIcon : ''} /></button></div></div>
   </article>;
 }
 
 function PreviewDialog({ creator, saved, onClose, onSave }) {
   if (!creator) return null;
-  return <div className={styles.previewLayer} role="presentation" onClick={onClose}><section className={styles.previewDialog} role="dialog" aria-modal="true" aria-labelledby="creator-preview-title" onClick={event => event.stopPropagation()}><button className={styles.dialogClose} type="button" onClick={onClose} aria-label="Close creator preview"><DashboardIcon name="close" /></button><img src={creator.profileImageUrl || '/7035402.svg'} alt="" /><div className={styles.previewCopy}><span>{Number(creator.trendingCount) ? 'TRENDING CREATOR' : 'CREATOR PROFILE'}</span><h2 id="creator-preview-title">{creator.name}</h2><p>{creator.summaryDisplay || 'Explore available creator links and media.'}</p><dl><div><small>Open links</small><strong>{formatCount(creator.openLinkCount)}</strong></div><div><small>Trending links</small><strong>{formatCount(creator.trendingCount)}</strong></div></dl><div><Link href={`/model/${encodeURIComponent(creator.slug)}`}>Open profile <DashboardIcon name="arrow" size={16} /></Link><button type="button" aria-pressed={saved} onClick={() => onSave(creator.id)}><DashboardIcon name="bookmark" size={16} />{saved ? 'Saved' : 'Save creator'}</button></div></div></section></div>;
+  return <div className={styles.previewLayer} role="presentation" onClick={onClose}><section className={styles.previewDialog} role="dialog" aria-modal="true" aria-labelledby="creator-preview-title" onClick={event => event.stopPropagation()}><button className={styles.dialogClose} type="button" onClick={onClose} aria-label="Close creator preview"><DashboardIcon name="close" /></button><img src={creator.profileImageUrl || '/7035402.svg'} alt="" /><div className={styles.previewCopy}><span>{Number(creator.trendingCount) ? 'TRENDING CREATOR' : 'CREATOR PROFILE'}</span><h2 id="creator-preview-title">{creator.name}</h2><p>{creator.summaryDisplay || 'Explore available creator links and media.'}</p><dl><div><small>Open links</small><strong>{formatCount(creator.openLinkCount)}</strong></div><div><small>Trending links</small><strong>{formatCount(creator.trendingCount)}</strong></div></dl><div><Link href={`/creator/${encodeURIComponent(creator.slug)}`}>Open profile <DashboardIcon name="arrow" size={16} /></Link><button type="button" aria-pressed={saved} onClick={() => onSave(creator.id)}><DashboardIcon name="bookmark" size={16} />{saved ? 'Saved' : 'Save creator'}</button></div></div></section></div>;
 }
 
 export function DiscoverDashboard({ initialData = {}, page = 'discover' }) {
