@@ -653,7 +653,7 @@ def summary_message(stats: Mapping[str, int], duration_seconds: float) -> str:
         f"Feed checked: {stats['feed']} · New: {stats['new']}\n"
         f"Associated: {stats['associated_records']} listings / {stats['associations']} creator links\n"
         f"Unmatched listings: {stats['unmatched']}\n"
-        f"Mega links resolved: {stats['resolved']} · Still pending: {stats['pending']}\n"
+        f"Mega links resolved this run: {stats['resolved']} · Current-feed pending: {stats['pending']}\n"
         f"Image uploads skipped/failed: {stats['image_failures']} · {duration_seconds:.1f}s"
     )
 
