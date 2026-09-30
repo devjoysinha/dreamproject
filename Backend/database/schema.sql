@@ -68,3 +68,4 @@ CREATE INDEX IF NOT EXISTS models_updated_at_idx ON models (source_updated_at DE
 CREATE INDEX IF NOT EXISTS model_tags_code_idx ON model_tags (code);
 CREATE INDEX IF NOT EXISTS media_items_created_at_idx ON media_items (created_at DESC NULLS LAST);
 CREATE INDEX IF NOT EXISTS model_open_links_model_position_idx ON model_open_links (model_id, position);
+CREATE INDEX IF NOT EXISTS model_open_links_content_position_idx ON model_open_links (content_id, position);
