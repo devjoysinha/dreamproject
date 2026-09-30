@@ -3,6 +3,7 @@ import express from 'express';
 import { z } from 'zod';
 import { config } from './config.js';
 import { pool } from './db.js';
+import { getCachedJson, setCachedJson } from './cache.js';
 
 const listQuery = z.object({
   query: z.string().trim().max(120).optional(),
@@ -70,6 +71,10 @@ function parseOrRespond(schema, input, res) {
   return parsed.data;
 }
 
+function requestCacheKey(prefix, query) {
+  return `dream:${prefix}:v1:${JSON.stringify(query)}`;
+}
+
 export const app = express();
 app.disable('x-powered-by');
 app.use(cors({ origin: config.FRONTEND_ORIGIN, methods: ['GET'] }));
@@ -87,6 +92,9 @@ app.get('/health', async (_req, res, next) => {
 app.get('/api/open-links', async (req, res, next) => {
   const query = parseOrRespond(openLinksQuery, req.query, res);
   if (!query) return;
+  const cacheKey = requestCacheKey('open-links', query);
+  const cached = await getCachedJson(cacheKey);
+  if (cached) return res.json(cached);
   const filters = [];
   const values = [];
   if (query.query) {
@@ -130,7 +138,9 @@ app.get('/api/open-links', async (req, res, next) => {
       pool.query(sql, values),
       pool.query(totalSql, values.slice(0, -2)),
     ]);
-    res.json({ items: items.rows, total: total.rows[0].total, limit: query.limit, offset: query.offset });
+    const payload = { items: items.rows, total: total.rows[0].total, limit: query.limit, offset: query.offset };
+    await setCachedJson(cacheKey, payload, 20);
+    res.json(payload);
   } catch (error) {
     next(error);
   }
@@ -139,6 +149,9 @@ app.get('/api/open-links', async (req, res, next) => {
 app.get('/api/models', async (req, res, next) => {
   const query = parseOrRespond(listQuery, req.query, res);
   if (!query) return;
+  const cacheKey = requestCacheKey('models', query);
+  const cached = await getCachedJson(cacheKey);
+  if (cached) return res.json(cached);
   const filters = [];
   const values = [];
   if (query.query) {
@@ -176,7 +189,9 @@ app.get('/api/models', async (req, res, next) => {
       pool.query(sql, values),
       pool.query(totalSql, values.slice(0, -2)),
     ]);
-    res.json({ items: items.rows, total: total.rows[0].total, limit: query.limit, offset: query.offset });
+    const payload = { items: items.rows, total: total.rows[0].total, limit: query.limit, offset: query.offset };
+    await setCachedJson(cacheKey, payload, 45);
+    res.json(payload);
   } catch (error) {
     next(error);
   }
@@ -207,6 +222,9 @@ const countryNames = {
 };
 
 app.get('/api/model-filters', async (_req, res, next) => {
+  const cacheKey = 'dream:model-filters:v1';
+  const cached = await getCachedJson(cacheKey);
+  if (cached) return res.json(cached);
   try {
     const [countries, bodies, chests, tags] = await Promise.all([
       pool.query(`SELECT token AS code, COUNT(*)::int AS count
@@ -226,12 +244,14 @@ app.get('/api/model-filters', async (_req, res, next) => {
       const match = row.value.match(/(?:^|[0-9])([A-Z]{1,3})(?:\s|\(|$)/i);
       if (match) cupCounts.set(match[1].toUpperCase(), (cupCounts.get(match[1].toUpperCase()) || 0) + 1);
     }
-    res.json({
+    const payload = {
       countries: countries.rows.map(row => ({ value: row.code.toLowerCase(), label: countryNames[row.code] || row.code, count: row.count })),
       bodyTypes: bodies.rows.map(row => ({ value: row.value, label: row.value, count: row.count })),
       cupSizes: [...cupCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([value, count]) => ({ value, label: value, count })),
       tags: tags.rows.map(row => ({ value: row.code, label: row.label, count: row.count })),
-    });
+    };
+    await setCachedJson(cacheKey, payload, 300);
+    res.json(payload);
   } catch (error) {
     next(error);
   }
@@ -240,6 +260,9 @@ app.get('/api/model-filters', async (_req, res, next) => {
 app.get('/api/models/:slug', async (req, res, next) => {
   const page = parseOrRespond(paginationQuery, req.query, res);
   if (!page) return;
+  const cacheKey = requestCacheKey(`model:${req.params.slug}`, page);
+  const cached = await getCachedJson(cacheKey);
+  if (cached) return res.json(cached);
   try {
     const modelResult = await pool.query(`SELECT ${cardFields}, m.bio, m.profile_meta AS "profileMeta", m.social_links AS "socialLinks", m.source_model_url AS "sourceModelUrl", m.source_complete AS "isComplete" FROM models m ${cardJoins} WHERE m.slug = $1`, [req.params.slug]);
     const model = modelResult.rows[0];
@@ -259,7 +282,9 @@ app.get('/api/models/:slug', async (req, res, next) => {
         LIMIT $2 OFFSET $3
       `, [model.id, page.limit, page.offset]),
     ]);
-    res.json({ ...model, tags: tags.rows, openLinks: openLinks.rows, openLinksLimit: page.limit, openLinksOffset: page.offset });
+    const payload = { ...model, tags: tags.rows, openLinks: openLinks.rows, openLinksLimit: page.limit, openLinksOffset: page.offset };
+    await setCachedJson(cacheKey, payload, 45);
+    res.json(payload);
   } catch (error) {
     next(error);
   }
