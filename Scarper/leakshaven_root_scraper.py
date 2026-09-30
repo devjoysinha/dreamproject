@@ -564,6 +564,23 @@ def pending_content_count(connection: psycopg.Connection[Any], content_ids: Sequ
         return int(cursor.fetchone()[0])
 
 
+def latest_root_content_ids(
+    connection: psycopg.Connection[Any],
+    asset_public_base_url: str,
+    limit: int,
+) -> List[str]:
+    """Return the persisted latest root-feed window, not the historical backlog."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """SELECT content_id FROM media_items
+               WHERE image_url LIKE %s
+               ORDER BY created_at DESC NULLS LAST, updated_at DESC
+               LIMIT %s""",
+            (f"{asset_public_base_url.rstrip('/')}/root-feed/%", limit),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
 def upsert_feed(connection: psycopg.Connection[Any], records: Sequence[Mapping[str, Any]], associations: Mapping[str, Sequence[str]]) -> Tuple[int, int]:
     if not records:
         return 0, 0
@@ -706,17 +723,23 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                         item["image_url"] = asset_store.local_url(item["source_image"])
                 stats["image_failures"] = asset_store.upload_failures
                 _items, stats["associations"] = upsert_feed(connection, records, associations)
-                # Current root-feed listings take priority over the historical
-                # pending queue; no-new-item runs still work through that backlog.
+                # Resolve only the persisted latest root window. This avoids
+                # abandoning a link when it rolls out of the API's next page,
+                # while never consuming the historical model-import backlog.
+                root_window_ids = latest_root_content_ids(
+                    connection,
+                    config.asset_public_base_url,
+                    config.root_count,
+                ) or [item["content_id"] for item in records]
                 pending_ids = pending_content_ids(
                     connection,
                     config.max_resolves,
-                    [item["content_id"] for item in records],
+                    root_window_ids,
                 )
                 LOGGER.info("Resolving %s pending direct links.", len(pending_ids))
                 resolved, _unresolved = resolve_batch(context, page, pending_ids, config.redirect_timeout) if pending_ids else ({}, 0)
                 stats["resolved"] = mark_resolved(connection, resolved)
-                stats["pending"] = pending_content_count(connection, [item["content_id"] for item in records])
+                stats["pending"] = pending_content_count(connection, root_window_ids)
             else:
                 stats["associations"] = sum(len(value) for value in associations.values())
         duration = time.monotonic() - started
