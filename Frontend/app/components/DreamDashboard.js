@@ -32,11 +32,11 @@ function initials(value = '') {
 function formatCount(value) { return Number(value || 0).toLocaleString(); }
 
 export function DashboardBrand() {
-  return <Link href="/discover" className={styles.brand} aria-label="Dreamproject Discover home"><span className={styles.brandMark}><span>D</span><i /></span><span>Dream<span>project</span></span></Link>;
+  return <Link href="/" className={styles.brand} aria-label="LeakPorns Discover home"><img className={styles.brandLogo} src="/7035402.svg" alt="LeakPorns" /><span>Leak<span>Porns</span></span></Link>;
 }
 
 const navGroups = [
-  ['Menu', [['Discover', 'compass', '/discover'], ['Explore', 'grid', '/creators'], ['Studio', 'wand'], ['Messages', 'message'], ['Account', 'user']]],
+  ['Menu', [['Discover', 'compass', '/'], ['Explore', 'grid', '/creators'], ['Studio', 'wand'], ['Messages', 'message'], ['Account', 'user']]],
   ['Library', [['Collections', 'layers'], ['Creators', 'users', '/creators'], ['Favorites', 'heart'], ['Downloads', 'download']]],
   ['Other', [['Upgrade', 'crown', '/upgrade'], ['Rewards', 'gift']]],
 ];
@@ -44,7 +44,7 @@ const navGroups = [
 export function DashboardSidebar({ active, savedCount, onUnavailable, mobileOpen, onClose }) {
   const item = ([label, icon, href]) => href ? <Link key={label} href={href} className={active === label ? styles.activeNav : ''}><DashboardIcon name={icon} /><span>{label}</span>{label === 'Upgrade' && <b>Pro</b>}{label === 'Favorites' && savedCount ? <em>{savedCount}</em> : null}</Link> : <button key={label} type="button" onClick={() => onUnavailable(`${label} is coming soon.`)}><DashboardIcon name={icon} /><span>{label}</span>{label === 'Favorites' && savedCount ? <em>{savedCount}</em> : null}</button>;
   return <>
-    <aside className={`${styles.sidebar}${mobileOpen ? ` ${styles.sidebarOpen}` : ''}`} aria-label="Dreamproject navigation">
+    <aside className={`${styles.sidebar}${mobileOpen ? ` ${styles.sidebarOpen}` : ''}`} aria-label="LeakPorns navigation">
       <div className={styles.sidebarTop}><DashboardBrand /><button className={styles.mobileClose} type="button" onClick={onClose} aria-label="Close navigation"><DashboardIcon name="close" /></button></div>
       <nav>{navGroups.map(([heading, items]) => <section key={heading}><p>{heading}</p>{items.map(item)}</section>)}</nav>
       <div className={styles.sidebarFoot}><div className={styles.credit}><DashboardIcon name="spark" size={15} /><span>2,450 credits</span><Link href="/upgrade">Top up</Link></div><button className={styles.accountButton} type="button" onClick={() => onUnavailable('Account features are coming soon.')}><span>JS</span><i><strong>Joy Sinha</strong><small>Free plan</small></i><DashboardIcon name="chevron" size={15} /></button></div>
@@ -148,9 +148,9 @@ export function DiscoverDashboard({ initialData = {}, page = 'discover' }) {
 }
 
 const plans = [
-  { id: 'free', name: 'Free', subtitle: 'Explore Dreamproject', monthly: 0, yearly: 0, badge: 'CURRENT PLAN', features: ['Limited creator browsing', '3 daily discovery credits', 'Public creator profiles', 'Standard support'] },
-  { id: 'plus', name: 'Dream Plus', subtitle: 'Everything you need every day', monthly: 799, yearly: 7990, badge: 'MOST POPULAR', accent: true, features: ['Full creator library', '25 discovery credits per day', 'Premium creator profiles', 'No advertising', 'Priority support'] },
-  { id: 'ultra', name: 'Dream Ultra', subtitle: 'The complete Dreamproject experience', monthly: 1499, yearly: 14990, badge: 'BEST VALUE', features: ['Everything in Dream Plus', 'Unlimited standard credits', 'Exclusive creator collections', 'HD / 4K where available', 'Early access features'] },
+  { id: 'free', name: 'Free', subtitle: 'Explore LeakPorns', monthly: 0, yearly: 0, badge: 'CURRENT PLAN', features: ['Limited creator browsing', '3 daily discovery credits', 'Public creator profiles', 'Standard support'] },
+  { id: 'plus', name: 'LeakPorns Plus', subtitle: 'Everything you need every day', monthly: 799, yearly: 7990, badge: 'MOST POPULAR', accent: true, features: ['Full creator library', '25 discovery credits per day', 'Premium creator profiles', 'No advertising', 'Priority support'] },
+  { id: 'ultra', name: 'LeakPorns Ultra', subtitle: 'The complete LeakPorns experience', monthly: 1499, yearly: 14990, badge: 'BEST VALUE', features: ['Everything in LeakPorns Plus', 'Unlimited standard credits', 'Exclusive creator collections', 'HD / 4K where available', 'Early access features'] },
 ];
 
 export function UpgradeDashboard() {
@@ -167,7 +167,7 @@ export function UpgradeDashboard() {
       <div className={styles.backGlow} />
       <header className={styles.mobileHeader}><DashboardBrand /><Link className={styles.mobileUpgradeBack} href="/discover">Discover</Link></header>
       <section className={styles.upgradeHero}>
-        <span><DashboardIcon name="spark" size={13} />UPGRADE</span><h1>Upgrade your Dreamproject</h1><p>Choose the plan that matches how you explore, create and use Dreamproject.</p>
+        <span><DashboardIcon name="spark" size={13} />UPGRADE</span><h1>Upgrade your LeakPorns plan</h1><p>Choose the plan that matches how you explore, create and use LeakPorns.</p>
         <div className={styles.billingToggle} role="group" aria-label="Choose billing period"><button className={billing === 'monthly' ? styles.billingActive : ''} type="button" onClick={() => setBilling('monthly')}>Monthly</button><button className={billing === 'yearly' ? styles.billingActive : ''} type="button" onClick={() => setBilling('yearly')}>Yearly <b>Save 17%</b></button></div>
       </section>
       <section className={styles.pricingGrid}>{plans.map(plan => <article className={`${styles.pricingCard}${plan.accent ? ` ${styles.featuredPlan}` : ''}`} key={plan.id}>

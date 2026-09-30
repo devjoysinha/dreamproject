@@ -1,13 +1,17 @@
-import HomeClient from './HomeClient';
+import { DiscoverLinksDashboard } from './components/DiscoverLinksDashboard';
 import { fetchBackendJson } from './lib/backend';
 
 export const revalidate = 30;
+export const dynamic = 'force-dynamic';
+export const metadata = {
+  title: 'LeakPorns — Discover',
+  description: 'Browse the newest available open links from creators.',
+};
 
-export default async function HomePage({ searchParams }) {
-  const params = await searchParams;
+export default async function HomePage() {
   const initialData = await fetchBackendJson('/api/open-links', {
-    searchParams: { sort: params?.sort || 'newest', limit: 24, offset: 0, query: params?.q || params?.query, ethnicity: params?.ethnicity },
+    searchParams: { sort: 'newest', limit: 30, offset: 0 },
     revalidate: 30,
   });
-  return <HomeClient initialData={initialData || { items: [], total: 0 }} />;
+  return <DiscoverLinksDashboard initialData={initialData || { items: [], total: 0 }} />;
 }

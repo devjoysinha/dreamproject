@@ -1,11 +1,11 @@
-import { DiscoverDashboard } from '../components/DreamDashboard';
+import { DiscoverLinksDashboard } from '../components/DiscoverLinksDashboard';
 import { fetchBackendJson } from '../lib/backend';
 
 export const revalidate = 30;
 export const dynamic = 'force-dynamic';
-export const metadata = { title: 'Dreamproject Discover', description: 'Explore trending creators and collections.' };
+export const metadata = { title: 'LeakPorns — Discover', description: 'Browse the newest available open links from creators.' };
 
 export default async function DiscoverPage() {
-  const initialData = await fetchBackendJson('/api/models', { searchParams: { sort: 'hot', limit: 30, offset: 0 }, revalidate: 30 });
-  return <DiscoverDashboard initialData={initialData || { items: [], total: 0 }} page="discover" />;
+  const initialData = await fetchBackendJson('/api/open-links', { searchParams: { sort: 'newest', limit: 30, offset: 0 }, revalidate: 30 });
+  return <DiscoverLinksDashboard initialData={initialData || { items: [], total: 0 }} />;
 }

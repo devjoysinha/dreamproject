@@ -12,7 +12,7 @@ export async function generateMetadata({ params }) {
   const { slug } = await params;
   const model = await fetchBackendJson(`/api/models/${encodeURIComponent(normalizeSlug(slug))}`, { searchParams: { limit: 60 }, revalidate: 30 });
   const name = model?.name || 'Creator profile';
-  return { title: `${name} | Dreamproject`, description: model?.summaryDisplay || `Explore ${name}'s available collections.` };
+  return { title: `${name} | LeakPorns`, description: model?.summaryDisplay || `Explore ${name}'s available collections.` };
 }
 
 export default async function CreatorProfilePage({ params }) {
