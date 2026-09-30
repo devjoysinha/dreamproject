@@ -1,9 +1,9 @@
 [Unit]
-Description=Run the Leakporns root-feed scraper every five minutes
+Description=Run the Leakporns root-feed scraper every thirty minutes
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=5min
+OnUnitActiveSec=30min
 AccuracySec=20s
 Persistent=true
 Unit=dream-scraper.service
