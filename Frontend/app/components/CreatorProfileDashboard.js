@@ -5,7 +5,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { DashboardBrand, DashboardIcon, DashboardSidebar } from './DreamDashboard';
 import styles from './DreamDashboard.module.css';
 
-const apiBase = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'development' ? 'https://leakporns.com' : '');
+// Keep browser requests on the current origin. Next rewrites /api to the
+// backend internally, so visitors never need a direct backend host.
+const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
 const tabs = [['all', 'All'], ['images', 'Photos'], ['videos', 'Videos'], ['trending', 'Trending']];
 const sorts = [['recent', 'Recently updated'], ['media', 'Most media'], ['title', 'Title A–Z']];
 

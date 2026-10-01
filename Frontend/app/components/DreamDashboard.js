@@ -6,7 +6,9 @@ import styles from './DreamDashboard.module.css';
 
 // A local UI preview can use the deployed read-only API when a local backend is not running.
 // Production keeps same-origin API requests through the Next.js rewrite.
-const apiBase = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'development' ? 'https://leakporns.com' : '');
+// Keep browser requests on the current origin. Next rewrites /api to the
+// backend internally, so visitors never need a direct backend host.
+const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
 const ethnicities = [['', 'All backgrounds'], ['white', 'White'], ['asian', 'Asian'], ['arab', 'Arab'], ['ebony', 'Ebony'], ['indian', 'Indian'], ['latina', 'Latina']];
 const sorts = [['hot', 'Trending'], ['links', 'Most linked'], ['newest', 'Recently added'], ['name', 'A–Z']];
 
