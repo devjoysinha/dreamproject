@@ -21,6 +21,8 @@ const region = process.env.ASSET_REGION || 'us-east-1';
 const publicBaseUrl = (process.env.ASSET_PUBLIC_BASE_URL || 'https://dzromswftdto7.cloudfront.net').replace(/\/+$/, '');
 const keyPrefix = (process.env.ASSET_KEY_PREFIX || 'imgcrate').replace(/^\/+|\/+$/g, '');
 const concurrency = Math.max(1, Number(process.env.IMAGE_MIGRATION_CONCURRENCY || 8));
+const includeFrontendFiles = process.env.MIGRATE_FRONTEND_IMAGE_URLS !== 'false';
+const includeDatabaseSourceUrls = process.env.MIGRATE_DATABASE_IMAGE_URLS !== 'false';
 const s3 = new S3Client({ region });
 const unavailableKey = `${keyPrefix}/unavailable.svg`;
 const unavailableUrl = `${publicBaseUrl}/${unavailableKey}`;
@@ -241,16 +243,17 @@ async function updateDatabase(migrated) {
 
 async function main() {
   const modelFiles = await jsonFiles();
-  const records = await Promise.all([...modelFiles, ...frontendFiles].map(readJson));
+  const records = await Promise.all([...modelFiles, ...(includeFrontendFiles ? frontendFiles : [])].map(readJson));
   const sources = new Map();
   records.forEach(({ data }) => collectSourceUrls(data, sources));
-  const databaseUrls = await databaseImageUrls();
+  const databaseUrls = includeDatabaseSourceUrls ? await databaseImageUrls() : [];
   databaseUrls.forEach((url) => collectSourceUrls(url, sources));
   const summary = {
     sourceDirectory,
     modelFiles: modelFiles.length,
-    frontendFiles: frontendFiles.map((file) => path.relative(projectRoot, file)),
+    frontendFiles: includeFrontendFiles ? frontendFiles.map((file) => path.relative(projectRoot, file)) : [],
     databaseSourceUrls: databaseUrls.length,
+    includeDatabaseSourceUrls,
     uniqueSourceImages: sources.size,
     bucket,
     publicBaseUrl,
