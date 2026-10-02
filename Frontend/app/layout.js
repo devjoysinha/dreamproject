@@ -8,9 +8,12 @@ export const metadata = {
   title: 'Leakporns — Library',
   description: 'Creator media library',
   icons: {
-    icon: '/7035402.svg',
-    shortcut: '/7035402.svg',
-    apple: '/7035402.svg',
+    icon: [
+      { url: '/favicon.ico', sizes: '48x48', type: 'image/x-icon' },
+      { url: '/favicon-96.png', sizes: '96x96', type: 'image/png' },
+    ],
+    shortcut: '/favicon.ico',
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
   },
 };
 
