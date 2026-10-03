@@ -63,6 +63,27 @@ CREATE TABLE IF NOT EXISTS ingest_runs (
   error_message TEXT
 );
 
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  email_normalized TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  plan TEXT NOT NULL DEFAULT 'free' CHECK (plan IN ('free', 'plus', 'ultra')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS oauth_identities (
+  provider TEXT NOT NULL,
+  provider_subject TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email_at_link TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (provider, provider_subject)
+);
+
+CREATE INDEX IF NOT EXISTS oauth_identities_user_idx ON oauth_identities (user_id);
+
 CREATE INDEX IF NOT EXISTS models_name_idx ON models USING GIN (to_tsvector('simple', name));
 CREATE INDEX IF NOT EXISTS models_updated_at_idx ON models (source_updated_at DESC NULLS LAST);
 CREATE INDEX IF NOT EXISTS model_tags_code_idx ON model_tags (code);

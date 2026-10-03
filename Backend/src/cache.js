@@ -41,6 +41,41 @@ export async function setCachedJson(key, value, ttlSeconds = 30) {
   }
 }
 
+// Authentication state and sessions deliberately use separate helpers from the
+// short-lived catalogue cache. Callers must treat a false return as unavailable.
+export async function setPrivateJson(key, value, ttlSeconds) {
+  try {
+    if (!(await ready())) return false;
+    await client.set(key, JSON.stringify(value), { EX: ttlSeconds });
+    return true;
+  } catch (error) {
+    console.warn(`Redis private write skipped: ${error.message}`);
+    return false;
+  }
+}
+
+export async function getPrivateJson(key) {
+  try {
+    if (!(await ready())) return null;
+    const value = await client.get(key);
+    return value ? JSON.parse(value) : null;
+  } catch (error) {
+    console.warn(`Redis private read skipped: ${error.message}`);
+    return null;
+  }
+}
+
+export async function deletePrivateKey(key) {
+  try {
+    if (!(await ready())) return false;
+    await client.del(key);
+    return true;
+  } catch (error) {
+    console.warn(`Redis private delete skipped: ${error.message}`);
+    return false;
+  }
+}
+
 export async function closeCache() {
   try {
     if (client?.isOpen) await client.quit();

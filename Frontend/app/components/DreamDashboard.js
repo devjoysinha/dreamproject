@@ -38,18 +38,32 @@ export function DashboardBrand() {
 }
 
 const navGroups = [
-  ['Menu', [['Discover', 'compass', '/'], ['Explore', 'grid', '/creators'], ['Studio', 'wand'], ['Messages', 'message'], ['Account', 'user']]],
+  ['Menu', [['Discover', 'compass', '/'], ['Explore', 'grid', '/creators'], ['Studio', 'wand'], ['Messages', 'message'], ['Account', 'user', '/auth/sign-in']]],
   ['Library', [['Collections', 'layers'], ['Creators', 'users', '/creators'], ['Favorites', 'heart'], ['Downloads', 'download']]],
   ['Other', [['Upgrade', 'crown', '/upgrade'], ['Rewards', 'gift']]],
 ];
 
 export function DashboardSidebar({ active, savedCount, onUnavailable, mobileOpen, onClose }) {
+  const [auth, setAuth] = useState({ loading: true, user: null });
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${apiBase}/api/auth/me`, { signal: controller.signal, cache: 'no-store' })
+      .then(response => response.ok ? response.json() : { user: null })
+      .then(data => setAuth({ loading: false, user: data.user || null }))
+      .catch(() => setAuth({ loading: false, user: null }));
+    return () => controller.abort();
+  }, []);
+  const signOut = async () => {
+    try { await fetch(`${apiBase}/api/auth/logout`, { method: 'POST', credentials: 'same-origin' }); } finally { window.location.assign('/discover'); }
+  };
+  const accountName = auth.user?.displayName || auth.user?.email || 'Sign in';
+  const accountInitials = initials(accountName);
   const item = ([label, icon, href]) => href ? <Link key={label} href={href} className={active === label ? styles.activeNav : ''}><DashboardIcon name={icon} /><span>{label}</span>{label === 'Upgrade' && <b>Pro</b>}{label === 'Favorites' && savedCount ? <em>{savedCount}</em> : null}</Link> : <button key={label} type="button" onClick={() => onUnavailable(`${label} is coming soon.`)}><DashboardIcon name={icon} /><span>{label}</span>{label === 'Favorites' && savedCount ? <em>{savedCount}</em> : null}</button>;
   return <>
     <aside className={`${styles.sidebar}${mobileOpen ? ` ${styles.sidebarOpen}` : ''}`} aria-label="LeakPorns navigation">
       <div className={styles.sidebarTop}><DashboardBrand /><button className={styles.mobileClose} type="button" onClick={onClose} aria-label="Close navigation"><DashboardIcon name="close" /></button></div>
       <nav>{navGroups.map(([heading, items]) => <section key={heading}><p>{heading}</p>{items.map(item)}</section>)}</nav>
-      <div className={styles.sidebarFoot}><div className={styles.credit}><DashboardIcon name="spark" size={15} /><span>2,450 credits</span><Link href="/upgrade">Top up</Link></div><button className={styles.accountButton} type="button" onClick={() => onUnavailable('Account features are coming soon.')}><span>JS</span><i><strong>Joy Sinha</strong><small>Free plan</small></i><DashboardIcon name="chevron" size={15} /></button></div>
+      <div className={styles.sidebarFoot}><div className={styles.credit}><DashboardIcon name="spark" size={15} /><span>2,450 credits</span><Link href="/upgrade">Top up</Link></div>{auth.loading ? <div className={styles.accountButton} aria-label="Checking sign-in status"><span>…</span><i><strong>Loading account</strong><small>Please wait</small></i></div> : auth.user ? <button className={styles.accountButton} type="button" onClick={signOut} title="Sign out"><span>{accountInitials}</span><i><strong>{accountName}</strong><small>{auth.user.plan === 'free' ? 'Free plan · Sign out' : `${auth.user.plan} plan · Sign out`}</small></i><DashboardIcon name="chevron" size={15} /></button> : <Link className={styles.accountButton} href="/auth/sign-in"><span>LP</span><i><strong>Sign in</strong><small>Guest</small></i><DashboardIcon name="chevron" size={15} /></Link>}</div>
     </aside>
     {mobileOpen && <button className={styles.navScrim} type="button" aria-label="Close navigation" onClick={onClose} />}
   </>;

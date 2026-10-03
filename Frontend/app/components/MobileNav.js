@@ -4,7 +4,7 @@ const items = [
   ['browse', 'Browse', '/'],
   ['models', 'Models', '/models'],
   ['chat', 'Chat', '/chat'],
-  ['account', 'Account', '/account'],
+  ['account', 'Account', '/auth/sign-in'],
 ];
 
 const paths = {

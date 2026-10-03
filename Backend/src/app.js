@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { config } from './config.js';
 import { pool } from './db.js';
 import { getCachedJson, setCachedJson } from './cache.js';
+import { authRouter } from './auth.js';
 
 const listQuery = z.object({
   query: z.string().trim().max(120).optional(),
@@ -88,6 +89,8 @@ app.get('/health', async (_req, res, next) => {
     next(error);
   }
 });
+
+app.use('/api/auth', authRouter);
 
 app.get('/api/open-links', async (req, res, next) => {
   const query = parseOrRespond(openLinksQuery, req.query, res);

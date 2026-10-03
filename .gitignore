@@ -11,6 +11,9 @@ Frontend/.next/
 .env.*
 !.env.example
 
+# OAuth credentials are runtime secrets, never source-controlled.
+**/client_secret_*.json
+
 # OS and editor files
 .DS_Store
 .vscode/
