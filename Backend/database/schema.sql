@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS oauth_identities (
   PRIMARY KEY (provider, provider_subject)
 );
 
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
 CREATE INDEX IF NOT EXISTS oauth_identities_user_idx ON oauth_identities (user_id);
 
 CREATE INDEX IF NOT EXISTS models_name_idx ON models USING GIN (to_tsvector('simple', name));

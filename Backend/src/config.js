@@ -28,9 +28,11 @@ const localGoogleCredentials = readLocalGoogleCredentials();
 const frontendOrigin = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
 // Local development may use the ignored Google JSON downloaded from Google Cloud.
 // Production must set explicit environment variables; it never falls back to a file.
-const localSessionSecret = process.env.NODE_ENV === 'production' || !localGoogleCredentials
+const localSessionSecret = process.env.NODE_ENV === 'production'
   ? undefined
-  : crypto.createHash('sha256').update(`leakporns-local-session:${localGoogleCredentials.client_secret}`).digest('hex');
+  : (localGoogleCredentials
+    ? crypto.createHash('sha256').update(`leakporns-local-session:${localGoogleCredentials.client_secret}`).digest('hex')
+    : crypto.randomBytes(48).toString('hex'));
 
 const schema = z.object({
   DATABASE_URL: z.string().url(),
