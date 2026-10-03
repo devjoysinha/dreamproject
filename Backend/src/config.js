@@ -1,5 +1,36 @@
 import 'dotenv/config';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { z } from 'zod';
+
+function readLocalGoogleCredentials() {
+  const requestedPath = process.env.GOOGLE_OAUTH_CREDENTIALS_FILE;
+  const candidates = requestedPath ? [requestedPath] : (() => {
+    try {
+      return fs.readdirSync(process.cwd())
+        .filter(file => /^client_secret_.*\.json$/i.test(file))
+        .map(file => path.join(process.cwd(), file));
+    } catch { return []; }
+  })();
+  if (candidates.length === 0) return null;
+  if (candidates.length > 1) throw new Error('Set GOOGLE_OAUTH_CREDENTIALS_FILE to the one Google OAuth credential file to use.');
+  try {
+    const credentials = JSON.parse(fs.readFileSync(candidates[0], 'utf8')).web;
+    if (!credentials?.client_id || !credentials?.client_secret) throw new Error('missing web credentials');
+    return credentials;
+  } catch (error) {
+    throw new Error(`Unable to load Google OAuth credentials: ${error.message}`);
+  }
+}
+
+const localGoogleCredentials = readLocalGoogleCredentials();
+const frontendOrigin = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
+// Local development may use the ignored Google JSON downloaded from Google Cloud.
+// Production must set explicit environment variables; it never falls back to a file.
+const localSessionSecret = process.env.NODE_ENV === 'production' || !localGoogleCredentials
+  ? undefined
+  : crypto.createHash('sha256').update(`leakporns-local-session:${localGoogleCredentials.client_secret}`).digest('hex');
 
 const schema = z.object({
   DATABASE_URL: z.string().url(),
@@ -15,4 +46,11 @@ const schema = z.object({
   SESSION_COOKIE_NAME: z.string().regex(/^[a-zA-Z0-9_-]+$/).default('lp_session'),
 });
 
-export const config = schema.parse(process.env);
+export const config = schema.parse({
+  ...process.env,
+  FRONTEND_ORIGIN: frontendOrigin,
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || localGoogleCredentials?.client_id,
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || localGoogleCredentials?.client_secret,
+  GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI || (localGoogleCredentials ? `${frontendOrigin}/api/auth/google/callback` : undefined),
+  SESSION_SECRET: process.env.SESSION_SECRET || localSessionSecret,
+});

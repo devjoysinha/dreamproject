@@ -4,6 +4,13 @@ import { config } from './config.js';
 let client;
 let connection;
 let available = false;
+const developmentPrivateStore = new Map();
+const allowDevelopmentPrivateStore = process.env.NODE_ENV !== 'production';
+
+function pruneDevelopmentPrivateStore() {
+  const now = Date.now();
+  for (const [key, entry] of developmentPrivateStore) if (entry.expiresAt <= now) developmentPrivateStore.delete(key);
+}
 
 if (config.REDIS_URL) {
   client = createClient({ url: config.REDIS_URL, socket: { connectTimeout: 1000, reconnectStrategy: false } });
@@ -45,7 +52,12 @@ export async function setCachedJson(key, value, ttlSeconds = 30) {
 // short-lived catalogue cache. Callers must treat a false return as unavailable.
 export async function setPrivateJson(key, value, ttlSeconds) {
   try {
-    if (!(await ready())) return false;
+    if (!(await ready())) {
+      if (!allowDevelopmentPrivateStore) return false;
+      pruneDevelopmentPrivateStore();
+      developmentPrivateStore.set(key, { value, expiresAt: Date.now() + (ttlSeconds * 1000) });
+      return true;
+    }
     await client.set(key, JSON.stringify(value), { EX: ttlSeconds });
     return true;
   } catch (error) {
@@ -56,7 +68,11 @@ export async function setPrivateJson(key, value, ttlSeconds) {
 
 export async function getPrivateJson(key) {
   try {
-    if (!(await ready())) return null;
+    if (!(await ready())) {
+      if (!allowDevelopmentPrivateStore) return null;
+      pruneDevelopmentPrivateStore();
+      return developmentPrivateStore.get(key)?.value || null;
+    }
     const value = await client.get(key);
     return value ? JSON.parse(value) : null;
   } catch (error) {
@@ -67,7 +83,11 @@ export async function getPrivateJson(key) {
 
 export async function deletePrivateKey(key) {
   try {
-    if (!(await ready())) return false;
+    if (!(await ready())) {
+      if (!allowDevelopmentPrivateStore) return false;
+      developmentPrivateStore.delete(key);
+      return true;
+    }
     await client.del(key);
     return true;
   } catch (error) {
