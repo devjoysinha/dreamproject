@@ -649,6 +649,25 @@ def mark_resolved(connection: psycopg.Connection[Any], resolved: Mapping[str, st
     return len(resolved)
 
 
+def discard_pending(connection: psycopg.Connection[Any], content_ids: Sequence[str]) -> int:
+    """Remove unresolved records from the current feed window.
+
+    Discovery retains only records for which the resolver captured a destination.
+    `model_open_links` rows are removed automatically by its foreign-key cascade.
+    """
+    if not content_ids:
+        return 0
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """DELETE FROM media_items
+               WHERE content_id = ANY(%s) AND mega_url IS NULL AND status = 'pending'""",
+            (list(content_ids),),
+        )
+        removed = cursor.rowcount
+    connection.commit()
+    return removed
+
+
 def telegram_notify(config: Config, message: str) -> None:
     if not config.telegram_token or not config.telegram_chat_id:
         LOGGER.warning("Telegram notification skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing.")
@@ -670,7 +689,7 @@ def summary_message(stats: Mapping[str, int], duration_seconds: float) -> str:
         f"Feed checked: {stats['feed']} · New: {stats['new']}\n"
         f"Associated: {stats['associated_records']} listings / {stats['associations']} creator links\n"
         f"Unmatched listings: {stats['unmatched']}\n"
-        f"Mega links resolved this run: {stats['resolved']} · Current-feed pending: {stats['pending']}\n"
+        f"Direct links resolved this run: {stats['resolved']} · Unresolved removed: {stats['discarded']}\n"
         f"Image uploads skipped/failed: {stats['image_failures']} · {duration_seconds:.1f}s"
     )
 
@@ -679,7 +698,7 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
     started = time.monotonic()
     stats: Dict[str, int] = {
         "feed": 0, "new": 0, "associated_records": 0, "associations": 0,
-        "unmatched": 0, "resolved": 0, "pending": 0, "image_failures": 0,
+        "unmatched": 0, "resolved": 0, "pending": 0, "discarded": 0, "image_failures": 0,
     }
     # A bad database host must fail the run promptly instead of holding the
     # five-minute scheduler slot until systemd terminates it.
@@ -739,6 +758,7 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                 LOGGER.info("Resolving %s pending direct links.", len(pending_ids))
                 resolved, _unresolved = resolve_batch(context, page, pending_ids, config.redirect_timeout) if pending_ids else ({}, 0)
                 stats["resolved"] = mark_resolved(connection, resolved)
+                stats["discarded"] = discard_pending(connection, root_window_ids)
                 stats["pending"] = pending_content_count(connection, root_window_ids)
             else:
                 stats["associations"] = sum(len(value) for value in associations.values())
