@@ -27,12 +27,12 @@ function LinkPreview({ item, onClose }) {
   </div>;
 }
 
-function OpenLinkCard({ item, saved, onSave, onPreview }) {
+function OpenLinkCard({ item, saved, onSave, onPreview, eager = false }) {
   const title = item.title || 'Untitled collection';
   const profileHref = item.modelSlug ? `/creator/${encodeURIComponent(item.modelSlug)}` : '/creators';
   return <article className={styles.discoverLinkCard}>
     <button type="button" className={styles.discoverLinkMedia} onClick={() => onPreview(item)} aria-label={`Preview ${title}`}>
-      {item.imageUrl ? <img src={item.imageUrl} alt="" loading="lazy" /> : <span className={styles.discoverLinkFallback}><DashboardIcon name="image" size={28} /></span>}
+      {item.imageUrl ? <img src={item.imageUrl} alt="" loading={eager ? 'eager' : 'lazy'} fetchPriority={eager ? 'high' : 'auto'} decoding="async" /> : <span className={styles.discoverLinkFallback}><DashboardIcon name="image" size={28} /></span>}
       <span className={styles.discoverLinkShade} />
       {item.isTrending && <span className={styles.discoverTrending}>Trending</span>}
       {item.isPremium && <span className={styles.discoverPremium}><DashboardIcon name="crown" size={13} />Premium</span>}
@@ -125,7 +125,7 @@ export function DiscoverLinksDashboard({ initialData = {} }) {
       </section>
       <section className={styles.heading}><div><p>— OPEN LINKS</p><h1>Discover</h1><span>Browse the newest available links from creators in one feed.</span></div><small>{formatCount(total)} links available</small></section>
       <div className={styles.chips} aria-label="Quick link filters"><button className={!query && !ethnicity && sort === 'newest' ? styles.selectedChip : ''} type="button" onClick={() => { setQuery(''); setQueryDraft(''); setEthnicity(''); setSort('newest'); }}>All links</button><button className={sort === 'trending' ? styles.selectedChip : ''} type="button" onClick={() => setSort('trending')}>Trending</button><button className={sort === 'newest' ? styles.selectedChip : ''} type="button" onClick={() => setSort('newest')}>Recently added</button><Link href="/creators" className={styles.discoverChipLink}>Browse creators <DashboardIcon name="arrow" size={14} /></Link></div>
-      {loading ? <div className={styles.linkSkeletonGrid} aria-label="Loading open links">{Array.from({ length: 8 }, (_, index) => <div key={index} />)}</div> : items.length ? <section className={styles.discoverLinkGrid} aria-label="Available direct open links">{items.map(item => <OpenLinkCard key={item.id} item={item} saved={saved.includes(item.id)} onSave={toggleSaved} onPreview={setPreview} />)}</section> : <section className={styles.empty}><DashboardIcon name="search" size={28} /><h2>No open links found</h2><p>Try another creator or link title.</p><button type="button" onClick={() => { setQuery(''); setQueryDraft(''); resetFilters(); }}>Clear filters</button></section>}
+      {loading ? <div className={styles.linkSkeletonGrid} aria-label="Loading open links">{Array.from({ length: 8 }, (_, index) => <div key={index} />)}</div> : items.length ? <section className={styles.discoverLinkGrid} aria-label="Available direct open links">{items.map((item, index) => <OpenLinkCard key={item.id} item={item} eager={index === 0} saved={saved.includes(item.id)} onSave={toggleSaved} onPreview={setPreview} />)}</section> : <section className={styles.empty}><DashboardIcon name="search" size={28} /><h2>No open links found</h2><p>Try another creator or link title.</p><button type="button" onClick={() => { setQuery(''); setQueryDraft(''); resetFilters(); }}>Clear filters</button></section>}
       {items.length < total && <button className={styles.loadMore} type="button" onClick={loadMore} disabled={loadingMore}>{loadingMore ? 'Loading links…' : 'Load more links'} <DashboardIcon name="arrow" size={16} /></button>}
     </main>
     <nav className={styles.bottomNav} aria-label="Mobile navigation"><Link href="/discover" className={styles.bottomActive}><DashboardIcon name="compass" /><span>Discover</span></Link><Link href="/creators"><DashboardIcon name="grid" /><span>Creators</span></Link><button type="button" onClick={() => setNotice('Saved links are stored on this device.')}><DashboardIcon name="bookmark" /><span>Saved</span></button><Link href="/upgrade"><DashboardIcon name="crown" /><span>Upgrade</span></Link></nav>

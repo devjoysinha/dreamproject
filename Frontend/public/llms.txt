@@ -1,0 +1,16 @@
+# Leakporns
+
+Leakporns is an adult-content discovery site for OnlyFans, Fansly, and premium creator photos, videos, profiles, collections, and available links.
+
+## Important pages
+
+- https://leakporns.com/ — Discover the latest available links.
+- https://leakporns.com/models — Browse searchable OnlyFans and premium creator profiles.
+- https://leakporns.com/creators — Explore the creator directory.
+- https://leakporns.com/sitemap.xml — Machine-readable list of indexable public URLs.
+- https://leakporns.com/privacy — Privacy Policy.
+- https://leakporns.com/terms — Terms of Service.
+
+## Content notes
+
+Profile data, collection counts, tags, and links can change frequently. Prefer the canonical model pages listed in the sitemap. Authentication, API, and account routes are not public content.

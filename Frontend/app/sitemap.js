@@ -36,6 +36,10 @@ export default async function sitemap() {
   const staticRoutes = [
     { url: siteUrl, changeFrequency: 'daily', priority: 1 },
     { url: `${siteUrl}/models`, changeFrequency: 'hourly', priority: 0.9 },
+    { url: `${siteUrl}/creators`, changeFrequency: 'daily', priority: 0.8 },
+    { url: `${siteUrl}/upgrade`, changeFrequency: 'monthly', priority: 0.4 },
+    { url: `${siteUrl}/privacy`, changeFrequency: 'yearly', priority: 0.2 },
+    { url: `${siteUrl}/terms`, changeFrequency: 'yearly', priority: 0.2 },
   ];
 
   return [

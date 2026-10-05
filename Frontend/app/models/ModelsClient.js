@@ -159,7 +159,7 @@ export default function ModelsPage({ initialData = {}, initialFilterOptions = {}
       </div></section>}
       <p className="models-status" aria-live="polite">{isLoading ? 'Loading model catalogue…' : `${activeSort}${activeFilterCount ? ` · ${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'} active` : ''}`}</p>
       <section className="creator-grid" aria-label="Creators">{creators.map((creator, index) => <article className="creator-card" key={creator.id}>
-        <img src={creator.profileImageUrl || '/7035402.svg'} alt={`${creator.name} profile`} loading={index < 5 ? 'eager' : 'lazy'} />
+        <img src={creator.profileImageUrl || '/7035402.svg'} alt={`${creator.name} profile`} loading={index < 5 ? 'eager' : 'lazy'} fetchPriority={index === 0 ? 'high' : 'auto'} decoding="async" />
         <div className="creator-shade" />
         <CountryFlag summary={creator.summaryDisplay} />
         <button className="bookmark" type="button" aria-label={`${saved.includes(creator.id) ? 'Remove' : 'Save'} ${creator.name}`} aria-pressed={saved.includes(creator.id)} onClick={() => toggleSaved(creator.id)}><BookmarkIcon filled={saved.includes(creator.id)} /></button>

@@ -1,12 +1,16 @@
 import './globals.css';
 import CloudflareAnalytics from './components/CloudflareAnalytics';
-
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://leakporns.com';
+import { absoluteUrl, defaultDescription, siteName, siteUrl } from './lib/seo';
 
 export const metadata = {
   metadataBase: new URL(siteUrl),
-  title: 'Leakporns — Library',
-  description: 'Creator media library',
+  title: { default: `${siteName} - Free OnlyFans Leaks & Photos`, template: `%s | ${siteName}` },
+  description: defaultDescription,
+  applicationName: siteName,
+  referrer: 'strict-origin-when-cross-origin',
+  formatDetection: { email: false, address: false, telephone: false },
+  openGraph: { siteName, type: 'website', locale: 'en_US', images: [{ url: absoluteUrl('/opengraph-image'), width: 1200, height: 630, alt: siteName }] },
+  twitter: { card: 'summary_large_image', images: [absoluteUrl('/opengraph-image')] },
   icons: {
     icon: [
       { url: '/favicon.ico', sizes: '48x48', type: 'image/x-icon' },

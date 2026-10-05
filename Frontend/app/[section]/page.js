@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import MobileNav from '../components/MobileNav';
 
+export const metadata = { robots: { index: false, follow: true } };
+
 const sections = {
   studio: { label: 'Studio', description: 'Creator tools will be available here once publishing is enabled.' },
   chat: { label: 'Chat', description: 'Chat is ready for the account and messaging service to be connected.' },

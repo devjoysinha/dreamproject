@@ -1,4 +1,5 @@
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://leakporns.com';
+import { absoluteUrl, siteName, siteUrl } from '../../lib/seo';
+
 const backendOrigin = process.env.BACKEND_ORIGIN || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 const countryNames = {
@@ -29,11 +30,6 @@ function truncate(value, maxLength = 160) {
   return `${text.slice(0, maxLength - 3).replace(/\s+\S*$/, '')}...`;
 }
 
-function getAliases(model) {
-  const aliases = typeof model?.profileMeta?.aliases === 'string' ? model.profileMeta.aliases.split('·') : [];
-  return [...new Set([model?.name, ...aliases, model?.sourceQuery].filter(Boolean).map(cleanText))];
-}
-
 function getSummary(model) {
   const meta = model?.profileMeta || {};
   const countryCode = model?.summaryDisplay?.match(/\b([A-Z]{2})\b/)?.[1];
@@ -55,33 +51,20 @@ export async function generateMetadata({ params }) {
   const { slug: rawSlug } = await params;
   const model = await getModel(rawSlug);
   const name = model?.name || fallbackName(rawSlug);
-  const aliases = getAliases(model || { name });
-  const title = `${aliases.join(', ')} OnlyFans Leaks - Free Photos & Videos - Leakporns`;
+  const title = `${name} OnlyFans Leaks - Free Photos & Videos`;
   const summary = getSummary(model);
-  const description = truncate(`Explore ${name}'s OnlyFans leaks videos and photos for free - ${summary}. ${model?.bio || `Browse ${name}'s available creator media and open links.`}`);
-  const tags = (model?.tags || []).map(tag => tag.label).filter(Boolean);
-  const keywords = [...new Set([
-    ...aliases,
-    ...aliases.map(alias => `${alias} OnlyFans`),
-    ...aliases.map(alias => `${alias} leaks`),
-    ...aliases.map(alias => `${alias} photos`),
-    ...tags,
-    'OnlyFans leaks',
-    'free photos and videos',
-    'Leakporns',
-  ])];
+  const description = truncate(`Explore ${name}'s available OnlyFans photos, videos, and open links${summary ? ` — ${summary}` : ''}. ${model?.bio || ''}`);
   const slug = profileSlug(rawSlug);
-  const canonical = `${siteUrl}/model/${encodeURIComponent(slug)}`;
-  const image = model?.profileImageUrl || undefined;
+  const canonical = absoluteUrl(`/model/${encodeURIComponent(slug)}`);
+  const image = model?.profileImageUrl || absoluteUrl('/opengraph-image');
   const isIndexable = Number(model?.openLinkCount) > 0;
 
   return {
     title,
     description,
-    keywords,
-    authors: [{ name: 'Leakporns' }],
-    creator: 'Leakporns',
-    publisher: 'Leakporns',
+    authors: [{ name: siteName }],
+    creator: siteName,
+    publisher: siteName,
     category: 'entertainment',
     metadataBase: new URL(siteUrl),
     alternates: { canonical, languages: { 'en-US': canonical, 'x-default': canonical } },
@@ -94,12 +77,12 @@ export async function generateMetadata({ params }) {
       title,
       description,
       url: canonical,
-      siteName: 'Leakporns',
+      siteName,
       type: 'website',
       locale: 'en_US',
-      ...(image ? { images: [{ url: image, width: 800, height: 600, alt: `${name} profile` }] } : {}),
+      images: [{ url: image, width: 800, height: 600, alt: `${name} profile` }],
     },
-    twitter: { card: 'summary_large_image', title, description, ...(image ? { images: [image] } : {}) },
+    twitter: { card: 'summary_large_image', title, description, images: [image] },
   };
 }
 

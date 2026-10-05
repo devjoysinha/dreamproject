@@ -63,11 +63,11 @@ function ContentPreview({ item, onClose }) {
   </div>;
 }
 
-function CollectionCard({ item, saved, onSave, onPreview }) {
+function CollectionCard({ item, saved, onSave, onPreview, eager = false }) {
   const label = item.title || 'Untitled collection';
   return <article className={styles.collectionCard}>
     <button type="button" className={styles.collectionImage} onClick={() => onPreview(item)} aria-label={`Preview ${label}`}>
-      {item.imageUrl ? <img src={item.imageUrl} alt="" loading="lazy" /> : <span className={styles.collectionFallback}><DashboardIcon name="image" size={26} /></span>}
+      {item.imageUrl ? <img src={item.imageUrl} alt="" loading={eager ? 'eager' : 'lazy'} fetchPriority={eager ? 'high' : 'auto'} decoding="async" /> : <span className={styles.collectionFallback}><DashboardIcon name="image" size={26} /></span>}
       <span className={styles.collectionShade} />
       {item.isTrending && <span className={styles.collectionBadge}>Trending</span>}
       {item.isPremium && <span className={styles.premiumRibbon}><DashboardIcon name="crown" size={13} />Premium</span>}
@@ -192,7 +192,7 @@ export function CreatorProfileDashboard({ slug, initialModel = null }) {
           <section className={styles.profileContent}>
             <header className={styles.contentHeading}><div><p>COLLECTIONS</p><h2>{model.name}&apos;s content</h2><span>Browse available collections and recently updated content.</span></div><small>{count(filteredLinks.length)} available</small></header>
             <div className={styles.contentControls}><div className={styles.profileTabs} role="tablist" aria-label="Content type">{tabs.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? styles.profileTabActive : ''} onClick={() => setTab(key)}>{label}</button>)}</div><label className={styles.profileSortLabel}>Sort <select value={sort} onChange={event => setSort(event.target.value)}>{sorts.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
-            {filteredLinks.length ? <><div className={styles.collectionGrid}>{filteredLinks.slice(0, visible).map(item => <CollectionCard key={item.id || item.shortCode || item.title} item={item} saved={savedCollections.includes(item.id || item.shortCode || item.title)} onSave={toggleCollection} onPreview={setPreview} />)}</div>{visible < filteredLinks.length && <button className={styles.loadMore} type="button" onClick={() => setVisible(value => value + 12)}>Load more collections <DashboardIcon name="arrow" size={16} /></button>}</> : <section className={styles.profileContentEmpty}><DashboardIcon name="search" size={25} /><h3>No matching collections</h3><p>Try another search term or choose a different content type.</p><button type="button" onClick={() => { setQuery(''); setTab('all'); }}>Clear filters</button></section>}
+            {filteredLinks.length ? <><div className={styles.collectionGrid}>{filteredLinks.slice(0, visible).map((item, index) => <CollectionCard key={item.id || item.shortCode || item.title} item={item} eager={index === 0} saved={savedCollections.includes(item.id || item.shortCode || item.title)} onSave={toggleCollection} onPreview={setPreview} />)}</div>{visible < filteredLinks.length && <button className={styles.loadMore} type="button" onClick={() => setVisible(value => value + 12)}>Load more collections <DashboardIcon name="arrow" size={16} /></button>}</> : <section className={styles.profileContentEmpty}><DashboardIcon name="search" size={25} /><h3>No matching collections</h3><p>Try another search term or choose a different content type.</p><button type="button" onClick={() => { setQuery(''); setTab('all'); }}>Clear filters</button></section>}
           </section>
         </div>
       </>}
