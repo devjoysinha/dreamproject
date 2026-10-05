@@ -138,7 +138,9 @@ def load_config() -> Config:
         telegram_chat_id=chat_id,
         notify_every_run=env_bool("TELEGRAM_NOTIFY_EVERY_RUN", True),
         root_count=env_int("LEAKSHAVEN_ROOT_COUNT", 30, 1, 30),
-        max_resolves=env_int("MAX_RESOLVES_PER_RUN", 8, 1, 12),
+        # Resolve every record in the root-feed window before applying the
+        # resolved-only retention policy below.
+        max_resolves=env_int("MAX_RESOLVES_PER_RUN", 30, 1, 30),
         request_timeout=env_int("REQUEST_TIMEOUT_SECONDS", 45, 10, 120),
         redirect_timeout=env_int("REDIRECT_TIMEOUT_SECONDS", 120, 15, 180),
         asset_bucket=os.getenv("ASSET_BUCKET", "dreamproject-profile-images").strip(),
@@ -421,6 +423,7 @@ def resolve_batch(context: Any, source_page: Any, content_ids: Sequence[str], ti
             except PlaywrightError:
                 pass
 
+    navigation_failures = 0
     try:
         for content_id in content_ids:
             target = context.new_page()
@@ -435,7 +438,7 @@ def resolve_batch(context: Any, source_page: Any, content_ids: Sequence[str], ti
                 )
             except (PlaywrightError, PlaywrightTimeoutError):
                 # The request listener can still have captured a valid redirect.
-                pass
+                navigation_failures += 1
         deadline = time.monotonic() + timeout
         pending = set(content_ids)
         while pending and time.monotonic() < deadline:
@@ -451,6 +454,10 @@ def resolve_batch(context: Any, source_page: Any, content_ids: Sequence[str], ti
                     pending.remove(content_id)
             if pending:
                 source_page.wait_for_timeout(150)
+        LOGGER.info(
+            "Direct-link resolution results: attempted=%s resolved=%s navigation_failures=%s unresolved=%s",
+            len(content_ids), len(resolved), navigation_failures, len(pending),
+        )
         return resolved, len(pending)
     finally:
         for page in pages.values():
@@ -689,7 +696,7 @@ def summary_message(stats: Mapping[str, int], duration_seconds: float) -> str:
         f"Feed checked: {stats['feed']} · New: {stats['new']}\n"
         f"Associated: {stats['associated_records']} listings / {stats['associations']} creator links\n"
         f"Unmatched listings: {stats['unmatched']}\n"
-        f"Direct links resolved this run: {stats['resolved']} · Unresolved removed: {stats['discarded']}\n"
+        f"Direct links attempted: {stats['attempted']} · Resolved: {stats['resolved']} · Unresolved removed: {stats['discarded']}\n"
         f"Image uploads skipped/failed: {stats['image_failures']} · {duration_seconds:.1f}s"
     )
 
@@ -698,7 +705,7 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
     started = time.monotonic()
     stats: Dict[str, int] = {
         "feed": 0, "new": 0, "associated_records": 0, "associations": 0,
-        "unmatched": 0, "resolved": 0, "pending": 0, "discarded": 0, "image_failures": 0,
+        "unmatched": 0, "attempted": 0, "resolved": 0, "pending": 0, "discarded": 0, "image_failures": 0,
     }
     # A bad database host must fail the run promptly instead of holding the
     # five-minute scheduler slot until systemd terminates it.
@@ -756,6 +763,7 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                     root_window_ids,
                 )
                 LOGGER.info("Resolving %s pending direct links.", len(pending_ids))
+                stats["attempted"] = len(pending_ids)
                 resolved, _unresolved = resolve_batch(context, page, pending_ids, config.redirect_timeout) if pending_ids else ({}, 0)
                 stats["resolved"] = mark_resolved(connection, resolved)
                 stats["discarded"] = discard_pending(connection, root_window_ids)

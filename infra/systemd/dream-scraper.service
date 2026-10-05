@@ -12,7 +12,9 @@ EnvironmentFile=/opt/dreamproject/Scarper/.env
 RuntimeDirectory=dream-scraper
 RuntimeDirectoryMode=0750
 ExecStart=/usr/bin/flock -n /run/dream-scraper/scraper.lock /opt/dreamproject/Scarper/.venv/bin/python /opt/dreamproject/Scarper/leakshaven_root_scraper.py
-TimeoutStartSec=4min30s
+# A full 30-item redirect batch can take up to approximately 17 minutes when
+# the source holds individual navigation attempts open before timing out.
+TimeoutStartSec=20min
 Nice=10
 NoNewPrivileges=true
 PrivateTmp=true
