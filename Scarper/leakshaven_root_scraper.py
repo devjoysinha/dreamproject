@@ -415,6 +415,7 @@ def resolve_batch(context: Any, source_page: Any, content_ids: Sequence[str], ti
     resolved: Dict[str, str] = {}
     navigation_statuses: Counter[str] = Counter()
     final_hosts: Counter[str] = Counter()
+    final_states: Counter[str] = Counter()
 
     def capture_request(request: Any, content_id: str) -> None:
         if is_mega_url(request.url):
@@ -479,9 +480,11 @@ def resolve_batch(context: Any, source_page: Any, content_ids: Sequence[str], ti
             try:
                 current_url = page.url
                 host = (urlsplit(current_url).hostname or "").casefold().rstrip(".")
+                body = page.locator("body").inner_text(timeout=1000).casefold()
             except (PlaywrightError, ValueError):
                 host = ""
                 current_url = ""
+                body = ""
             if is_mega_url(current_url):
                 final_hosts["mega"] += 1
             elif host == "leakshaven.com" or host.endswith(".leakshaven.com"):
@@ -490,14 +493,25 @@ def resolve_batch(context: Any, source_page: Any, content_ids: Sequence[str], ti
                 final_hosts["other"] += 1
             else:
                 final_hosts["blank"] += 1
+            if "validating" in body or "verify you are human" in body:
+                final_states["source-validation"] += 1
+            elif "access denied" in body or "error 1020" in body:
+                final_states["access-denied"] += 1
+            elif "unavailable" in body or "not found" in body:
+                final_states["unavailable"] += 1
+            elif body:
+                final_states["other-content"] += 1
+            else:
+                final_states["empty"] += 1
         LOGGER.info(
             "Direct-link resolution results: attempted=%s resolved=%s navigation_failures=%s unresolved=%s",
             len(content_ids), len(resolved), navigation_failures, len(pending),
         )
         LOGGER.info(
-            "Direct-link diagnostics: navigation_statuses=%s final_hosts=%s",
+            "Direct-link diagnostics: navigation_statuses=%s final_hosts=%s final_states=%s",
             dict(sorted(navigation_statuses.items())),
             dict(sorted(final_hosts.items())),
+            dict(sorted(final_states.items())),
         )
         return resolved, len(pending)
     finally:
