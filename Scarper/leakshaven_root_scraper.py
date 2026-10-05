@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+from collections import Counter
 import hashlib
 import json
 import logging
@@ -43,7 +44,9 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 ROOT = Path(__file__).resolve().parent
 API_URL = "https://api.leakshaven.com/content"
-ORIGIN_URL = "https://leakshaven.com/robots.txt"
+# Start from the normal public origin.  Direct-link requests made by a real
+# visitor originate from the site, not from its crawler-control document.
+ORIGIN_URL = "https://leakshaven.com/"
 LOGGER = logging.getLogger("leakshaven-root-scraper")
 
 LOW_BANDWIDTH_PREFS = {
@@ -410,6 +413,8 @@ def encrypted_content_id(page: Any, content_id: str) -> str:
 def resolve_batch(context: Any, source_page: Any, content_ids: Sequence[str], timeout: int) -> Tuple[Dict[str, str], int]:
     pages: Dict[str, Any] = {}
     resolved: Dict[str, str] = {}
+    navigation_statuses: Counter[str] = Counter()
+    final_hosts: Counter[str] = Counter()
 
     def capture_request(request: Any, content_id: str) -> None:
         if is_mega_url(request.url):
@@ -423,6 +428,15 @@ def resolve_batch(context: Any, source_page: Any, content_ids: Sequence[str], ti
             except PlaywrightError:
                 pass
 
+    def capture_response(response: Any, page: Any) -> None:
+        """Record aggregate navigation health without retaining source URLs."""
+        try:
+            request = response.request
+            if request.is_navigation_request() and request.frame == page.main_frame:
+                navigation_statuses[str(response.status)] += 1
+        except PlaywrightError:
+            navigation_statuses["response-error"] += 1
+
     navigation_failures = 0
     try:
         for content_id in content_ids:
@@ -430,15 +444,22 @@ def resolve_batch(context: Any, source_page: Any, content_ids: Sequence[str], ti
             pages[content_id] = target
             target.on("request", lambda request, current_id=content_id: capture_request(request, current_id))
             target.on("framenavigated", lambda frame, current_id=content_id, current_page=target: capture_navigation(frame, current_id, current_page))
+            target.on("response", lambda response, current_page=target: capture_response(response, current_page))
             try:
                 target.goto(
                     "https://leakshaven.com/get-link?leak=" + quote(encrypted_content_id(source_page, content_id), safe=""),
                     wait_until="commit",
                     timeout=min(timeout, 30) * 1000,
+                    referer=source_page.url,
                 )
-            except (PlaywrightError, PlaywrightTimeoutError):
+            except PlaywrightTimeoutError:
                 # The request listener can still have captured a valid redirect.
                 navigation_failures += 1
+                navigation_statuses["timeout"] += 1
+            except PlaywrightError:
+                # The request listener can still have captured a valid redirect.
+                navigation_failures += 1
+                navigation_statuses["playwright-error"] += 1
         deadline = time.monotonic() + timeout
         pending = set(content_ids)
         while pending and time.monotonic() < deadline:
@@ -454,9 +475,29 @@ def resolve_batch(context: Any, source_page: Any, content_ids: Sequence[str], ti
                     pending.remove(content_id)
             if pending:
                 source_page.wait_for_timeout(150)
+        for page in pages.values():
+            try:
+                current_url = page.url
+                host = (urlsplit(current_url).hostname or "").casefold().rstrip(".")
+            except (PlaywrightError, ValueError):
+                host = ""
+                current_url = ""
+            if is_mega_url(current_url):
+                final_hosts["mega"] += 1
+            elif host == "leakshaven.com" or host.endswith(".leakshaven.com"):
+                final_hosts["source"] += 1
+            elif host:
+                final_hosts["other"] += 1
+            else:
+                final_hosts["blank"] += 1
         LOGGER.info(
             "Direct-link resolution results: attempted=%s resolved=%s navigation_failures=%s unresolved=%s",
             len(content_ids), len(resolved), navigation_failures, len(pending),
+        )
+        LOGGER.info(
+            "Direct-link diagnostics: navigation_statuses=%s final_hosts=%s",
+            dict(sorted(navigation_statuses.items())),
+            dict(sorted(final_hosts.items())),
         )
         return resolved, len(pending)
     finally:
@@ -715,6 +756,7 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
         with camoufox_proxy(config.proxy_url) as browser_proxy, Camoufox(
             headless=True,
             proxy=browser_proxy,
+            geoip=True,
             persistent_context=True,
             user_data_dir=str(ROOT / ".camoufox-root-profile"),
             block_images=False,
