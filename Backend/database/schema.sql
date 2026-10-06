@@ -41,8 +41,13 @@ CREATE TABLE IF NOT EXISTS media_items (
   video_count INTEGER NOT NULL DEFAULT 0,
   mega_url TEXT,
   status TEXT,
+  resolution_attempts INTEGER NOT NULL DEFAULT 0,
+  last_resolution_attempt_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE media_items ADD COLUMN IF NOT EXISTS resolution_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE media_items ADD COLUMN IF NOT EXISTS last_resolution_attempt_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS model_open_links (
   model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,

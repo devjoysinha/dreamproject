@@ -98,7 +98,7 @@ app.get('/api/open-links', async (req, res, next) => {
   const cacheKey = requestCacheKey('open-links:v3', query);
   const cached = await getCachedJson(cacheKey);
   if (cached) return res.json(cached);
-  const filters = [];
+  const filters = ["item.mega_url IS NOT NULL", "item.status = 'resolved'"];
   const values = [];
   if (query.query) {
     values.push(`%${query.query}%`);
@@ -280,7 +280,7 @@ app.get('/api/models/:slug', async (req, res, next) => {
           item.video_count AS videos, item.mega_url AS "megaUrl", item.status
         FROM model_open_links relation
         JOIN media_items item ON item.content_id = relation.content_id
-        WHERE relation.model_id = $1
+        WHERE relation.model_id = $1 AND item.mega_url IS NOT NULL AND item.status = 'resolved'
         ORDER BY relation.position ASC
         LIMIT $2 OFFSET $3
       `, [model.id, page.limit, page.offset]),

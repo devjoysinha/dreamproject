@@ -72,6 +72,7 @@ class Config:
     resolve_batch_size: int
     direct_navigation_timeout: int
     direct_settle_timeout: int
+    max_direct_attempts: int
     asset_bucket: str
     asset_region: str
     asset_prefix: str
@@ -155,6 +156,7 @@ def load_config() -> Config:
         resolve_batch_size=env_int("DIRECT_LINK_BATCH_SIZE", 3, 1, 6),
         direct_navigation_timeout=env_int("DIRECT_LINK_NAVIGATION_TIMEOUT_SECONDS", 15, 8, 30),
         direct_settle_timeout=env_int("DIRECT_LINK_SETTLE_TIMEOUT_SECONDS", 45, 10, 120),
+        max_direct_attempts=env_int("MAX_DIRECT_LINK_ATTEMPTS", 4, 1, 8),
         asset_bucket=os.getenv("ASSET_BUCKET", "dreamproject-profile-images").strip(),
         asset_region=os.getenv("ASSET_REGION", "us-east-1").strip(),
         asset_prefix=os.getenv("ASSET_PREFIX", "root-feed").strip("/"),
@@ -642,6 +644,7 @@ def pending_content_ids(
     connection: psycopg.Connection[Any],
     limit: int,
     preferred_ids: Sequence[str] = (),
+    max_attempts: int = 4,
 ) -> List[str]:
     # Root scraping is intentionally scoped to the current feed window. Older
     # model-import backlog must not consume the redirect budget of this job.
@@ -650,24 +653,28 @@ def pending_content_ids(
     with connection.cursor() as cursor:
         cursor.execute(
             """SELECT content_id FROM media_items
-               WHERE mega_url IS NULL AND is_premium = FALSE AND status = 'pending'
+               WHERE mega_url IS NULL AND is_premium = FALSE
+                 AND status IN ('pending', 'retry_pending')
+                 AND resolution_attempts < %s
                  AND content_id = ANY(%s)
-               ORDER BY created_at DESC NULLS LAST, updated_at ASC
+               ORDER BY resolution_attempts ASC, created_at DESC NULLS LAST, updated_at ASC
                LIMIT %s""",
-            (list(preferred_ids), limit),
+            (max_attempts, list(preferred_ids), limit),
         )
         return [row[0] for row in cursor.fetchall()]
 
 
-def pending_content_count(connection: psycopg.Connection[Any], content_ids: Sequence[str]) -> int:
+def pending_content_count(connection: psycopg.Connection[Any], content_ids: Sequence[str], max_attempts: int) -> int:
     if not content_ids:
         return 0
     with connection.cursor() as cursor:
         cursor.execute(
             """SELECT COUNT(*) FROM media_items
-               WHERE mega_url IS NULL AND is_premium = FALSE AND status = 'pending'
+               WHERE mega_url IS NULL AND is_premium = FALSE
+                 AND status IN ('pending', 'retry_pending')
+                 AND resolution_attempts < %s
                  AND content_id = ANY(%s)""",
-            (list(content_ids),),
+            (max_attempts, list(content_ids)),
         )
         return int(cursor.fetchone()[0])
 
@@ -723,7 +730,11 @@ def upsert_feed(connection: psycopg.Connection[Any], records: Sequence[Mapping[s
                      size_display = EXCLUDED.size_display,
                      image_count = EXCLUDED.image_count,
                      video_count = EXCLUDED.video_count,
-                     status = CASE WHEN media_items.mega_url IS NOT NULL THEN 'resolved' ELSE EXCLUDED.status END,
+                     status = CASE
+                       WHEN media_items.mega_url IS NOT NULL THEN 'resolved'
+                       WHEN media_items.status = 'retry_pending' THEN 'retry_pending'
+                       ELSE EXCLUDED.status
+                     END,
                      updated_at = NOW()""",
                 record,
             )
@@ -757,19 +768,54 @@ def mark_resolved(connection: psycopg.Connection[Any], resolved: Mapping[str, st
     return len(resolved)
 
 
-def discard_pending(connection: psycopg.Connection[Any], content_ids: Sequence[str]) -> int:
-    """Remove unresolved records from the current feed window.
+def defer_unresolved(
+    connection: psycopg.Connection[Any],
+    attempted_ids: Sequence[str],
+    resolved_ids: Iterable[str],
+    max_attempts: int,
+) -> Tuple[int, int]:
+    """Hide unresolved candidates and retry them in later normal sessions.
 
-    Discovery retains only records for which the resolver captured a destination.
-    `model_open_links` rows are removed automatically by its foreign-key cascade.
+    A source validation page has no destination to store, but often clears for a
+    later browser session.  These records are deliberately not public: only
+    resolved rows are served by the API.  They are removed after a bounded
+    number of source sessions so the database cannot grow an unresolved queue.
     """
-    if not content_ids:
-        return 0
+    resolved_set = set(resolved_ids)
+    unresolved_ids = [content_id for content_id in attempted_ids if content_id not in resolved_set]
+    if not unresolved_ids:
+        return 0, 0
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """UPDATE media_items
+               SET status = 'retry_pending',
+                   resolution_attempts = resolution_attempts + 1,
+                   last_resolution_attempt_at = NOW(),
+                   updated_at = NOW()
+               WHERE content_id = ANY(%s) AND mega_url IS NULL""",
+            (unresolved_ids,),
+        )
+        deferred = cursor.rowcount
+        cursor.execute(
+            """DELETE FROM media_items
+               WHERE content_id = ANY(%s)
+                 AND mega_url IS NULL
+                 AND resolution_attempts >= %s""",
+            (unresolved_ids, max_attempts),
+        )
+        removed = cursor.rowcount
+    connection.commit()
+    return max(0, deferred - removed), removed
+
+
+def prune_stale_retries(connection: psycopg.Connection[Any]) -> int:
+    """Remove deferred root listings that no longer appear in the live feed."""
     with connection.cursor() as cursor:
         cursor.execute(
             """DELETE FROM media_items
-               WHERE content_id = ANY(%s) AND mega_url IS NULL AND status = 'pending'""",
-            (list(content_ids),),
+               WHERE status = 'retry_pending'
+                 AND mega_url IS NULL
+                 AND updated_at < NOW() - INTERVAL '2 hours'"""
         )
         removed = cursor.rowcount
     connection.commit()
@@ -797,7 +843,7 @@ def summary_message(stats: Mapping[str, int], duration_seconds: float) -> str:
         f"Feed checked: {stats['feed']} · New: {stats['new']}\n"
         f"Associated: {stats['associated_records']} listings / {stats['associations']} creator links\n"
         f"Unmatched listings: {stats['unmatched']}\n"
-        f"Direct links attempted: {stats['attempted']} · Resolved: {stats['resolved']} · Unresolved removed: {stats['discarded']}\n"
+        f"Direct links attempted: {stats['attempted']} · Resolved: {stats['resolved']} · Retry later: {stats['deferred']} · Removed: {stats['discarded']}\n"
         f"Image uploads skipped/failed: {stats['image_failures']} · {duration_seconds:.1f}s"
     )
 
@@ -806,7 +852,7 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
     started = time.monotonic()
     stats: Dict[str, int] = {
         "feed": 0, "new": 0, "associated_records": 0, "associations": 0,
-        "unmatched": 0, "attempted": 0, "resolved": 0, "pending": 0, "discarded": 0, "image_failures": 0,
+        "unmatched": 0, "attempted": 0, "resolved": 0, "pending": 0, "deferred": 0, "discarded": 0, "image_failures": 0,
     }
     # A bad database host must fail the run promptly instead of holding the
     # five-minute scheduler slot until systemd terminates it.
@@ -851,6 +897,7 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                         item["image_url"] = asset_store.local_url(item["source_image"])
                 stats["image_failures"] = asset_store.upload_failures
                 _items, stats["associations"] = upsert_feed(connection, records, associations)
+                stats["discarded"] += prune_stale_retries(connection)
                 # Resolve only the persisted latest root window. This avoids
                 # abandoning a link when it rolls out of the API's next page,
                 # while never consuming the historical model-import backlog.
@@ -863,6 +910,7 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                     connection,
                     config.max_resolves,
                     root_window_ids,
+                    config.max_direct_attempts,
                 )
                 LOGGER.info("Resolving %s pending direct links.", len(pending_ids))
                 resolved, attempted_ids = (
@@ -879,11 +927,18 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                 )
                 stats["attempted"] = len(attempted_ids)
                 stats["resolved"] = mark_resolved(connection, resolved)
-                # A browser crash must not silently delete links it never got
-                # the chance to visit.  Successfully attempted unresolved
-                # items retain the resolved-only policy.
-                stats["discarded"] = discard_pending(connection, attempted_ids)
-                stats["pending"] = pending_content_count(connection, root_window_ids)
+                stats["deferred"], removed = defer_unresolved(
+                    connection,
+                    attempted_ids,
+                    resolved,
+                    config.max_direct_attempts,
+                )
+                stats["discarded"] += removed
+                stats["pending"] = pending_content_count(
+                    connection,
+                    root_window_ids,
+                    config.max_direct_attempts,
+                )
             else:
                 stats["associations"] = sum(len(value) for value in associations.values())
         duration = time.monotonic() - started
