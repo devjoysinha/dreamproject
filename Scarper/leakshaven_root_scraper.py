@@ -69,6 +69,9 @@ class Config:
     max_resolves: int
     request_timeout: int
     redirect_timeout: int
+    resolve_batch_size: int
+    direct_navigation_timeout: int
+    direct_settle_timeout: int
     asset_bucket: str
     asset_region: str
     asset_prefix: str
@@ -146,6 +149,12 @@ def load_config() -> Config:
         max_resolves=env_int("MAX_RESOLVES_PER_RUN", 30, 1, 30),
         request_timeout=env_int("REQUEST_TIMEOUT_SECONDS", 45, 10, 120),
         redirect_timeout=env_int("REDIRECT_TIMEOUT_SECONDS", 120, 15, 180),
+        # Camoufox becomes unstable when a large number of dynamically
+        # rendered direct-link pages are kept open at once.  Keep only a small
+        # pool active and give each pool a short, bounded redirect window.
+        resolve_batch_size=env_int("DIRECT_LINK_BATCH_SIZE", 3, 1, 6),
+        direct_navigation_timeout=env_int("DIRECT_LINK_NAVIGATION_TIMEOUT_SECONDS", 15, 8, 30),
+        direct_settle_timeout=env_int("DIRECT_LINK_SETTLE_TIMEOUT_SECONDS", 45, 10, 120),
         asset_bucket=os.getenv("ASSET_BUCKET", "dreamproject-profile-images").strip(),
         asset_region=os.getenv("ASSET_REGION", "us-east-1").strip(),
         asset_prefix=os.getenv("ASSET_PREFIX", "root-feed").strip("/"),
@@ -410,9 +419,23 @@ def encrypted_content_id(page: Any, content_id: str) -> str:
     return f"{base64url(nonce)}:{base64url(ciphertext)}"
 
 
-def resolve_batch(context: Any, source_page: Any, content_ids: Sequence[str], timeout: int) -> Tuple[Dict[str, str], int]:
-    pages: Dict[str, Any] = {}
+def resolve_batch(
+    context: Any,
+    source_page: Any,
+    content_ids: Sequence[str],
+    batch_size: int,
+    navigation_timeout: int,
+    settle_timeout: int,
+) -> Tuple[Dict[str, str], List[str]]:
+    """Resolve direct links with a bounded browser-page pool.
+
+    Source pages include a resource-intensive application and validation flow.
+    Keeping the complete 30-item feed open concurrently exhausts the browser on
+    the production instance.  Small batches are slower but reliable, and an
+    interrupted browser leaves unattempted records for the next run.
+    """
     resolved: Dict[str, str] = {}
+    attempted_ids: List[str] = []
     navigation_statuses: Counter[str] = Counter()
     final_hosts: Counter[str] = Counter()
     final_states: Counter[str] = Counter()
@@ -439,87 +462,110 @@ def resolve_batch(context: Any, source_page: Any, content_ids: Sequence[str], ti
             navigation_statuses["response-error"] += 1
 
     navigation_failures = 0
-    try:
-        for content_id in content_ids:
-            target = context.new_page()
-            pages[content_id] = target
-            target.on("request", lambda request, current_id=content_id: capture_request(request, current_id))
-            target.on("framenavigated", lambda frame, current_id=content_id, current_page=target: capture_navigation(frame, current_id, current_page))
-            target.on("response", lambda response, current_page=target: capture_response(response, current_page))
-            try:
-                target.goto(
-                    "https://leakshaven.com/get-link?leak=" + quote(encrypted_content_id(source_page, content_id), safe=""),
-                    wait_until="commit",
-                    timeout=min(timeout, 30) * 1000,
-                    referer=source_page.url,
-                )
-            except PlaywrightTimeoutError:
-                # The request listener can still have captured a valid redirect.
-                navigation_failures += 1
-                navigation_statuses["timeout"] += 1
-            except PlaywrightError:
-                # The request listener can still have captured a valid redirect.
-                navigation_failures += 1
-                navigation_statuses["playwright-error"] += 1
-        deadline = time.monotonic() + timeout
-        pending = set(content_ids)
-        while pending and time.monotonic() < deadline:
-            for content_id in list(pending):
-                page = pages[content_id]
+    browser_unavailable = False
+
+    def record_page_state(page: Any) -> None:
+        try:
+            current_url = page.url
+            host = (urlsplit(current_url).hostname or "").casefold().rstrip(".")
+            body = page.locator("body").inner_text(timeout=1000).casefold()
+        except (PlaywrightError, PlaywrightTimeoutError, ValueError):
+            host = ""
+            current_url = ""
+            body = ""
+        if is_mega_url(current_url):
+            final_hosts["mega"] += 1
+        elif host == "leakshaven.com" or host.endswith(".leakshaven.com"):
+            final_hosts["source"] += 1
+        elif host:
+            final_hosts["other"] += 1
+        else:
+            final_hosts["blank"] += 1
+        if "validating" in body or "verify you are human" in body or "recaptcha" in body:
+            final_states["source-validation"] += 1
+        elif "access denied" in body or "error 1020" in body:
+            final_states["access-denied"] += 1
+        elif "unavailable" in body or "not found" in body:
+            final_states["unavailable"] += 1
+        elif body:
+            final_states["other-content"] += 1
+        else:
+            final_states["empty"] += 1
+
+    for offset in range(0, len(content_ids), batch_size):
+        pages: Dict[str, Any] = {}
+        batch_ids = content_ids[offset : offset + batch_size]
+        try:
+            for content_id in batch_ids:
                 try:
-                    current_url = page.url
+                    target = context.new_page()
+                except PlaywrightError as error:
+                    LOGGER.warning("Browser stopped before opening the next direct-link page: %s", redact_error(error))
+                    browser_unavailable = True
+                    break
+                pages[content_id] = target
+                attempted_ids.append(content_id)
+                target.on("request", lambda request, current_id=content_id: capture_request(request, current_id))
+                target.on("framenavigated", lambda frame, current_id=content_id, current_page=target: capture_navigation(frame, current_id, current_page))
+                target.on("response", lambda response, current_page=target: capture_response(response, current_page))
+                try:
+                    target.goto(
+                        "https://leakshaven.com/get-link?leak=" + quote(encrypted_content_id(source_page, content_id), safe=""),
+                        wait_until="commit",
+                        timeout=navigation_timeout * 1000,
+                        referer=source_page.url,
+                    )
+                except PlaywrightTimeoutError:
+                    # A redirect can still arrive after an initial timeout.
+                    navigation_failures += 1
+                    navigation_statuses["timeout"] += 1
+                except PlaywrightError as error:
+                    navigation_failures += 1
+                    navigation_statuses["playwright-error"] += 1
+                    if "closed" in str(error).casefold() or "crashed" in str(error).casefold():
+                        browser_unavailable = True
+                        break
+
+            pending = set(pages)
+            deadline = time.monotonic() + settle_timeout
+            while pending and time.monotonic() < deadline and not browser_unavailable:
+                for content_id in list(pending):
+                    page = pages[content_id]
+                    try:
+                        current_url = page.url
+                    except PlaywrightError:
+                        current_url = ""
+                    if is_mega_url(current_url):
+                        resolved.setdefault(content_id, current_url)
+                        pending.remove(content_id)
+                if pending:
+                    time.sleep(0.2)
+            for page in pages.values():
+                record_page_state(page)
+        finally:
+            for page in pages.values():
+                try:
+                    page.close()
                 except PlaywrightError:
-                    current_url = ""
-                if is_mega_url(current_url):
-                    resolved.setdefault(content_id, current_url)
-                if content_id in resolved:
-                    pending.remove(content_id)
-            if pending:
-                source_page.wait_for_timeout(150)
-        for page in pages.values():
-            try:
-                current_url = page.url
-                host = (urlsplit(current_url).hostname or "").casefold().rstrip(".")
-                body = page.locator("body").inner_text(timeout=1000).casefold()
-            except (PlaywrightError, ValueError):
-                host = ""
-                current_url = ""
-                body = ""
-            if is_mega_url(current_url):
-                final_hosts["mega"] += 1
-            elif host == "leakshaven.com" or host.endswith(".leakshaven.com"):
-                final_hosts["source"] += 1
-            elif host:
-                final_hosts["other"] += 1
-            else:
-                final_hosts["blank"] += 1
-            if "validating" in body or "verify you are human" in body:
-                final_states["source-validation"] += 1
-            elif "access denied" in body or "error 1020" in body:
-                final_states["access-denied"] += 1
-            elif "unavailable" in body or "not found" in body:
-                final_states["unavailable"] += 1
-            elif body:
-                final_states["other-content"] += 1
-            else:
-                final_states["empty"] += 1
-        LOGGER.info(
-            "Direct-link resolution results: attempted=%s resolved=%s navigation_failures=%s unresolved=%s",
-            len(content_ids), len(resolved), navigation_failures, len(pending),
-        )
-        LOGGER.info(
-            "Direct-link diagnostics: navigation_statuses=%s final_hosts=%s final_states=%s",
-            dict(sorted(navigation_statuses.items())),
-            dict(sorted(final_hosts.items())),
-            dict(sorted(final_states.items())),
-        )
-        return resolved, len(pending)
-    finally:
-        for page in pages.values():
-            try:
-                page.close()
-            except PlaywrightError:
-                pass
+                    pass
+        if browser_unavailable:
+            break
+        # Avoid presenting the source with a burst of application pages.
+        if offset + batch_size < len(content_ids):
+            time.sleep(1)
+
+    unresolved = len(attempted_ids) - len(resolved)
+    LOGGER.info(
+        "Direct-link resolution results: queued=%s attempted=%s resolved=%s navigation_failures=%s unresolved=%s browser_unavailable=%s",
+        len(content_ids), len(attempted_ids), len(resolved), navigation_failures, unresolved, browser_unavailable,
+    )
+    LOGGER.info(
+        "Direct-link diagnostics: navigation_statuses=%s final_hosts=%s final_states=%s",
+        dict(sorted(navigation_statuses.items())),
+        dict(sorted(final_hosts.items())),
+        dict(sorted(final_states.items())),
+    )
+    return resolved, attempted_ids
 
 
 class AssetStore:
@@ -819,10 +865,24 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                     root_window_ids,
                 )
                 LOGGER.info("Resolving %s pending direct links.", len(pending_ids))
-                stats["attempted"] = len(pending_ids)
-                resolved, _unresolved = resolve_batch(context, page, pending_ids, config.redirect_timeout) if pending_ids else ({}, 0)
+                resolved, attempted_ids = (
+                    resolve_batch(
+                        context,
+                        page,
+                        pending_ids,
+                        config.resolve_batch_size,
+                        config.direct_navigation_timeout,
+                        config.direct_settle_timeout,
+                    )
+                    if pending_ids
+                    else ({}, [])
+                )
+                stats["attempted"] = len(attempted_ids)
                 stats["resolved"] = mark_resolved(connection, resolved)
-                stats["discarded"] = discard_pending(connection, root_window_ids)
+                # A browser crash must not silently delete links it never got
+                # the chance to visit.  Successfully attempted unresolved
+                # items retain the resolved-only policy.
+                stats["discarded"] = discard_pending(connection, attempted_ids)
                 stats["pending"] = pending_content_count(connection, root_window_ids)
             else:
                 stats["associations"] = sum(len(value) for value in associations.values())
