@@ -44,9 +44,11 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 ROOT = Path(__file__).resolve().parent
 API_URL = "https://api.leakshaven.com/content"
-# Start from the normal public origin.  Direct-link requests made by a real
-# visitor originate from the site, not from its crawler-control document.
-ORIGIN_URL = "https://leakshaven.com/"
+# The lightweight document reliably establishes same-origin storage without
+# requiring the source's large, challenge-prone application shell.  Direct-link
+# requests still use the normal homepage as their HTTP referrer below.
+ORIGIN_URL = "https://leakshaven.com/robots.txt"
+SOURCE_REFERRER = "https://leakshaven.com/"
 LOGGER = logging.getLogger("leakshaven-root-scraper")
 
 LOW_BANDWIDTH_PREFS = {
@@ -515,7 +517,7 @@ def resolve_batch(
                         "https://leakshaven.com/get-link?leak=" + quote(encrypted_content_id(source_page, content_id), safe=""),
                         wait_until="commit",
                         timeout=navigation_timeout * 1000,
-                        referer=source_page.url,
+                        referer=SOURCE_REFERRER,
                     )
                 except PlaywrightTimeoutError:
                     # A redirect can still arrive after an initial timeout.
