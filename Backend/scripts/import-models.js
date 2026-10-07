@@ -127,7 +127,20 @@ async function importModels() {
               relative_age = EXCLUDED.relative_age, is_trending = EXCLUDED.is_trending, is_premium = EXCLUDED.is_premium,
               media_type = EXCLUDED.media_type, image_url = EXCLUDED.image_url, size_bytes = EXCLUDED.size_bytes,
               size_display = EXCLUDED.size_display, image_count = EXCLUDED.image_count, video_count = EXCLUDED.video_count,
-              mega_url = EXCLUDED.mega_url, status = EXCLUDED.status, updated_at = NOW()
+              -- A catalogue refresh must never regress a link that the resolver has
+              -- already verified.  Some source documents intentionally carry an
+              -- unresolved/null URL while the live resolver has since found one.
+              mega_url = CASE
+                WHEN media_items.status = 'resolved' AND media_items.mega_url IS NOT NULL
+                  THEN media_items.mega_url
+                ELSE EXCLUDED.mega_url
+              END,
+              status = CASE
+                WHEN media_items.status = 'resolved' AND media_items.mega_url IS NOT NULL
+                  THEN 'resolved'
+                ELSE EXCLUDED.status
+              END,
+              updated_at = NOW()
           )
           INSERT INTO model_open_links (model_id, content_id, position)
           SELECT $1, content_id, position FROM links
