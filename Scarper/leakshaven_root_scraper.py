@@ -20,7 +20,6 @@ import math
 import os
 import re
 import secrets
-import sys
 import threading
 import time
 import unicodedata
@@ -70,11 +69,10 @@ class Config:
     root_count: int
     max_resolves: int
     request_timeout: int
-    redirect_timeout: int
     resolve_batch_size: int
     direct_navigation_timeout: int
     direct_settle_timeout: int
-    max_direct_attempts: int
+    retry_cooldown_minutes: int
     asset_bucket: str
     asset_region: str
     asset_prefix: str
@@ -147,18 +145,20 @@ def load_config() -> Config:
         telegram_chat_id=chat_id,
         notify_every_run=env_bool("TELEGRAM_NOTIFY_EVERY_RUN", True),
         root_count=env_int("LEAKSHAVEN_ROOT_COUNT", 30, 1, 30),
-        # Resolve every record in the root-feed window before applying the
-        # resolved-only retention policy below.
+        # Give each run enough capacity for the current feed plus eligible
+        # persistent retries, while keeping the browser workload bounded.
         max_resolves=env_int("MAX_RESOLVES_PER_RUN", 30, 1, 30),
         request_timeout=env_int("REQUEST_TIMEOUT_SECONDS", 45, 10, 120),
-        redirect_timeout=env_int("REDIRECT_TIMEOUT_SECONDS", 120, 15, 180),
         # Camoufox becomes unstable when a large number of dynamically
         # rendered direct-link pages are kept open at once.  Keep only a small
         # pool active and give each pool a short, bounded redirect window.
         resolve_batch_size=env_int("DIRECT_LINK_BATCH_SIZE", 3, 1, 6),
         direct_navigation_timeout=env_int("DIRECT_LINK_NAVIGATION_TIMEOUT_SECONDS", 15, 8, 30),
         direct_settle_timeout=env_int("DIRECT_LINK_SETTLE_TIMEOUT_SECONDS", 45, 10, 120),
-        max_direct_attempts=env_int("MAX_DIRECT_LINK_ATTEMPTS", 4, 1, 8),
+        # A failed source-validation session must not destroy the listing.  A
+        # short cooldown makes the next scheduled run the retry boundary while
+        # preventing an immediate manual rerun from hammering the same links.
+        retry_cooldown_minutes=env_int("DIRECT_LINK_RETRY_COOLDOWN_MINUTES", 20, 1, 1440),
         asset_bucket=os.getenv("ASSET_BUCKET", "dreamproject-profile-images").strip(),
         asset_region=os.getenv("ASSET_REGION", "us-east-1").strip(),
         asset_prefix=os.getenv("ASSET_PREFIX", "root-feed").strip("/"),
@@ -535,6 +535,13 @@ def resolve_batch(
             while pending and time.monotonic() < deadline and not browser_unavailable:
                 for content_id in list(pending):
                     page = pages[content_id]
+                    # Request/framenavigation handlers may capture the MEGA URL
+                    # and stop navigation before `page.url` changes.  Treat that
+                    # event-captured destination as complete instead of waiting
+                    # the entire settle timeout for every successful batch.
+                    if content_id in resolved:
+                        pending.remove(content_id)
+                        continue
                     try:
                         current_url = page.url
                     except PlaywrightError:
@@ -646,56 +653,58 @@ def pending_content_ids(
     connection: psycopg.Connection[Any],
     limit: int,
     preferred_ids: Sequence[str] = (),
-    max_attempts: int = 4,
+    root_image_prefix: str = "",
+    retry_cooldown_minutes: int = 20,
 ) -> List[str]:
-    # Root scraping is intentionally scoped to the current feed window. Older
-    # model-import backlog must not consume the redirect budget of this job.
-    if not preferred_ids:
+    """Return a fair queue of current items and persistent root-feed retries.
+
+    Root rows remain eligible after they roll out of the latest 30-item source
+    window.  Model-import backlog is excluded by requiring either membership in
+    the current window or an image copied into the root-feed asset prefix.
+    """
+    if not preferred_ids and not root_image_prefix:
         return []
+    image_pattern = f"{root_image_prefix.rstrip('/')}/%" if root_image_prefix else ""
     with connection.cursor() as cursor:
         cursor.execute(
             """SELECT content_id FROM media_items
                WHERE mega_url IS NULL AND is_premium = FALSE
                  AND status IN ('pending', 'retry_pending')
-                 AND resolution_attempts < %s
-                 AND content_id = ANY(%s)
-               ORDER BY resolution_attempts ASC, created_at DESC NULLS LAST, updated_at ASC
+                 AND (content_id = ANY(%s) OR (%s <> '' AND image_url LIKE %s))
+                 AND (last_resolution_attempt_at IS NULL
+                      OR last_resolution_attempt_at <= NOW() - (%s * INTERVAL '1 minute'))
+               ORDER BY COALESCE(last_resolution_attempt_at, created_at, '-infinity'::timestamptz) ASC,
+                        resolution_attempts ASC,
+                        created_at DESC NULLS LAST
                LIMIT %s""",
-            (max_attempts, list(preferred_ids), limit),
+            (
+                list(preferred_ids),
+                image_pattern,
+                image_pattern,
+                retry_cooldown_minutes,
+                limit,
+            ),
         )
         return [row[0] for row in cursor.fetchall()]
 
 
-def pending_content_count(connection: psycopg.Connection[Any], content_ids: Sequence[str], max_attempts: int) -> int:
-    if not content_ids:
+def pending_content_count(
+    connection: psycopg.Connection[Any],
+    content_ids: Sequence[str],
+    root_image_prefix: str = "",
+) -> int:
+    if not content_ids and not root_image_prefix:
         return 0
+    image_pattern = f"{root_image_prefix.rstrip('/')}/%" if root_image_prefix else ""
     with connection.cursor() as cursor:
         cursor.execute(
             """SELECT COUNT(*) FROM media_items
                WHERE mega_url IS NULL AND is_premium = FALSE
                  AND status IN ('pending', 'retry_pending')
-                 AND resolution_attempts < %s
-                 AND content_id = ANY(%s)""",
-            (max_attempts, list(content_ids)),
+                 AND (content_id = ANY(%s) OR (%s <> '' AND image_url LIKE %s))""",
+            (list(content_ids), image_pattern, image_pattern),
         )
         return int(cursor.fetchone()[0])
-
-
-def latest_root_content_ids(
-    connection: psycopg.Connection[Any],
-    asset_public_base_url: str,
-    limit: int,
-) -> List[str]:
-    """Return the persisted latest root-feed window, not the historical backlog."""
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """SELECT content_id FROM media_items
-               WHERE image_url LIKE %s
-               ORDER BY created_at DESC NULLS LAST, updated_at DESC
-               LIMIT %s""",
-            (f"{asset_public_base_url.rstrip('/')}/root-feed/%", limit),
-        )
-        return [row[0] for row in cursor.fetchall()]
 
 
 def upsert_feed(connection: psycopg.Connection[Any], records: Sequence[Mapping[str, Any]], associations: Mapping[str, Sequence[str]]) -> Tuple[int, int]:
@@ -774,19 +783,18 @@ def defer_unresolved(
     connection: psycopg.Connection[Any],
     attempted_ids: Sequence[str],
     resolved_ids: Iterable[str],
-    max_attempts: int,
-) -> Tuple[int, int]:
+) -> int:
     """Hide unresolved candidates and retry them in later normal sessions.
 
     A source validation page has no destination to store, but often clears for a
-    later browser session.  These records are deliberately not public: only
-    resolved rows are served by the API.  They are removed after a bounded
-    number of source sessions so the database cannot grow an unresolved queue.
+    later browser session. These records are deliberately not public: only
+    resolved rows are served by the API. Attempts are telemetry, not a deletion
+    threshold; a transient source failure must never destroy the row.
     """
     resolved_set = set(resolved_ids)
     unresolved_ids = [content_id for content_id in attempted_ids if content_id not in resolved_set]
     if not unresolved_ids:
-        return 0, 0
+        return 0
     with connection.cursor() as cursor:
         cursor.execute(
             """UPDATE media_items
@@ -798,30 +806,8 @@ def defer_unresolved(
             (unresolved_ids,),
         )
         deferred = cursor.rowcount
-        cursor.execute(
-            """DELETE FROM media_items
-               WHERE content_id = ANY(%s)
-                 AND mega_url IS NULL
-                 AND resolution_attempts >= %s""",
-            (unresolved_ids, max_attempts),
-        )
-        removed = cursor.rowcount
     connection.commit()
-    return max(0, deferred - removed), removed
-
-
-def prune_stale_retries(connection: psycopg.Connection[Any]) -> int:
-    """Remove deferred root listings that no longer appear in the live feed."""
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """DELETE FROM media_items
-               WHERE status = 'retry_pending'
-                 AND mega_url IS NULL
-                 AND updated_at < NOW() - INTERVAL '2 hours'"""
-        )
-        removed = cursor.rowcount
-    connection.commit()
-    return removed
+    return deferred
 
 
 def telegram_notify(config: Config, message: str) -> None:
@@ -845,7 +831,8 @@ def summary_message(stats: Mapping[str, int], duration_seconds: float) -> str:
         f"Feed checked: {stats['feed']} · New: {stats['new']}\n"
         f"Associated: {stats['associated_records']} listings / {stats['associations']} creator links\n"
         f"Unmatched listings: {stats['unmatched']}\n"
-        f"Direct links attempted: {stats['attempted']} · Resolved: {stats['resolved']} · Retry later: {stats['deferred']} · Removed: {stats['discarded']}\n"
+        f"Direct links attempted: {stats['attempted']} · Resolved: {stats['resolved']} · Retry later: {stats['deferred']}\n"
+        f"Resolution queue remaining: {stats['pending']}\n"
         f"Image uploads skipped/failed: {stats['image_failures']} · {duration_seconds:.1f}s"
     )
 
@@ -854,7 +841,7 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
     started = time.monotonic()
     stats: Dict[str, int] = {
         "feed": 0, "new": 0, "associated_records": 0, "associations": 0,
-        "unmatched": 0, "attempted": 0, "resolved": 0, "pending": 0, "deferred": 0, "discarded": 0, "image_failures": 0,
+        "unmatched": 0, "attempted": 0, "resolved": 0, "pending": 0, "deferred": 0, "image_failures": 0,
     }
     # A bad database host must fail the run promptly instead of holding the
     # five-minute scheduler slot until systemd terminates it.
@@ -899,20 +886,14 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                         item["image_url"] = asset_store.local_url(item["source_image"])
                 stats["image_failures"] = asset_store.upload_failures
                 _items, stats["associations"] = upsert_feed(connection, records, associations)
-                stats["discarded"] += prune_stale_retries(connection)
-                # Resolve only the persisted latest root window. This avoids
-                # abandoning a link when it rolls out of the API's next page,
-                # while never consuming the historical model-import backlog.
-                root_window_ids = latest_root_content_ids(
-                    connection,
-                    config.asset_public_base_url,
-                    config.root_count,
-                ) or [item["content_id"] for item in records]
+                root_window_ids = [item["content_id"] for item in records]
+                root_image_prefix = f"{config.asset_public_base_url}/{config.asset_prefix}"
                 pending_ids = pending_content_ids(
                     connection,
                     config.max_resolves,
                     root_window_ids,
-                    config.max_direct_attempts,
+                    root_image_prefix,
+                    config.retry_cooldown_minutes,
                 )
                 LOGGER.info("Resolving %s pending direct links.", len(pending_ids))
                 resolved, attempted_ids = (
@@ -929,17 +910,15 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                 )
                 stats["attempted"] = len(attempted_ids)
                 stats["resolved"] = mark_resolved(connection, resolved)
-                stats["deferred"], removed = defer_unresolved(
+                stats["deferred"] = defer_unresolved(
                     connection,
                     attempted_ids,
                     resolved,
-                    config.max_direct_attempts,
                 )
-                stats["discarded"] += removed
                 stats["pending"] = pending_content_count(
                     connection,
                     root_window_ids,
-                    config.max_direct_attempts,
+                    root_image_prefix,
                 )
             else:
                 stats["associations"] = sum(len(value) for value in associations.values())
