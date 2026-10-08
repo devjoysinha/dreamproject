@@ -43,10 +43,10 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 ROOT = Path(__file__).resolve().parent
 API_URL = "https://api.leakshaven.com/content"
-# The lightweight document reliably establishes same-origin storage without
-# requiring the source's large, challenge-prone application shell.  Direct-link
-# requests still use the normal homepage as their HTTP referrer below.
-ORIGIN_URL = "https://leakshaven.com/robots.txt"
+# Bootstrap from the normal public page.  A crawler-control document does not
+# establish the same browser state as a real visitor and was followed by source
+# validation after only the first resolver batch.
+ORIGIN_URL = "https://leakshaven.com/"
 SOURCE_REFERRER = "https://leakshaven.com/"
 LOGGER = logging.getLogger("leakshaven-root-scraper")
 
@@ -70,6 +70,7 @@ class Config:
     max_resolves: int
     request_timeout: int
     resolve_batch_size: int
+    direct_request_interval_seconds: int
     direct_navigation_timeout: int
     direct_settle_timeout: int
     retry_cooldown_minutes: int
@@ -149,12 +150,16 @@ def load_config() -> Config:
         # persistent retries, while keeping the browser workload bounded.
         max_resolves=env_int("MAX_RESOLVES_PER_RUN", 30, 1, 30),
         request_timeout=env_int("REQUEST_TIMEOUT_SECONDS", 45, 10, 120),
-        # Camoufox becomes unstable when a large number of dynamically
-        # rendered direct-link pages are kept open at once.  Keep only a small
-        # pool active and give each pool a short, bounded redirect window.
-        resolve_batch_size=env_int("DIRECT_LINK_BATCH_SIZE", 3, 1, 6),
+        # Start one direct-link page at a time.  Bursting several new source
+        # pages was consistently followed by source validation after the first
+        # batch, leaving most of the feed unresolved.
+        resolve_batch_size=env_int("DIRECT_LINK_BATCH_SIZE", 1, 1, 6),
+        direct_request_interval_seconds=env_int("DIRECT_LINK_INTERVAL_SECONDS", 2, 1, 30),
         direct_navigation_timeout=env_int("DIRECT_LINK_NAVIGATION_TIMEOUT_SECONDS", 15, 8, 30),
-        direct_settle_timeout=env_int("DIRECT_LINK_SETTLE_TIMEOUT_SECONDS", 45, 10, 120),
+        # A genuine redirect is normally observed immediately by an event
+        # handler.  Keep failures bounded so validation pages do not consume
+        # the full scheduler slot.
+        direct_settle_timeout=env_int("DIRECT_LINK_SETTLE_TIMEOUT_SECONDS", 12, 10, 120),
         # A failed source-validation session must not destroy the listing.  A
         # short cooldown makes the next scheduled run the retry boundary while
         # preventing an immediate manual rerun from hammering the same links.
@@ -183,10 +188,17 @@ def is_mega_url(url: str) -> bool:
         host = (parsed.hostname or "").casefold().rstrip(".")
     except ValueError:
         return False
-    return (
-        (host == "mega.nz" or host.endswith(".mega.nz") or host == "mega.co.nz")
-        and bool(parsed.fragment)
-        and (parsed.path.startswith("/folder/") or parsed.path.startswith("/file/"))
+    if not (host == "mega.nz" or host.endswith(".mega.nz") or host == "mega.co.nz"):
+        return False
+    if not parsed.fragment:
+        return False
+    if parsed.path.startswith(("/folder/", "/file/")):
+        return True
+    # Older MEGA links use fragment-only paths such as #!id!key and
+    # #F!folder-id!key.  They remain valid destinations and otherwise get
+    # incorrectly sent back through the retry queue forever.
+    return parsed.path in {"", "/"} and bool(
+        re.fullmatch(r"(?:F!|!)?[^!/#]+![^!/#]+", parsed.fragment)
     )
 
 
@@ -377,11 +389,16 @@ def camoufox_proxy(proxy_url: str):
 
 
 def prepare_origin_page(page: Any, timeout: int) -> None:
+    # `commit` waits for the public document response and its cookies without
+    # making a large client-rendered application a prerequisite for resolving
+    # links.  The direct-link page shares this real source origin.
     response = page.goto(ORIGIN_URL, wait_until="commit", timeout=min(timeout, 30) * 1000)
     if response is not None and response.status >= 400:
         raise RuntimeError(f"Origin bootstrap returned HTTP {response.status}.")
-    page.wait_for_timeout(100)
-    page.evaluate("localStorage.clear(); sessionStorage.clear()")
+    # Do not clear local/session storage here.  The homepage may establish
+    # state used by the direct-link page; only the resolver-owned encryption
+    # key is created on demand below when absent.
+    page.wait_for_timeout(250)
 
 
 def feed_records(context: Any, count: int, timeout: int) -> List[Mapping[str, Any]]:
@@ -430,13 +447,14 @@ def resolve_batch(
     batch_size: int,
     navigation_timeout: int,
     settle_timeout: int,
+    inter_batch_delay: float = 2,
 ) -> Tuple[Dict[str, str], List[str]]:
     """Resolve direct links with a bounded browser-page pool.
 
     Source pages include a resource-intensive application and validation flow.
-    Keeping the complete 30-item feed open concurrently exhausts the browser on
-    the production instance.  Small batches are slower but reliable, and an
-    interrupted browser leaves unattempted records for the next run.
+    A small pool avoids browser pressure and an inter-batch pause avoids the
+    burst that causes source validation.  An interrupted browser leaves
+    unattempted records for the next run.
     """
     resolved: Dict[str, str] = {}
     attempted_ids: List[str] = []
@@ -456,14 +474,26 @@ def resolve_batch(
             except PlaywrightError:
                 pass
 
-    def capture_response(response: Any, page: Any) -> None:
-        """Record aggregate navigation health without retaining source URLs."""
+    def capture_response(response: Any, content_id: str, page: Any) -> None:
+        """Record navigation health and direct redirect destinations.
+
+        Some redirect responses are observed by Playwright before it emits an
+        outgoing request for the target.  Reading `Location` means a valid
+        destination is retained even if external navigation is cancelled or
+        blocked by the browser.
+        """
         try:
             request = response.request
             if request.is_navigation_request() and request.frame == page.main_frame:
                 navigation_statuses[str(response.status)] += 1
         except PlaywrightError:
             navigation_statuses["response-error"] += 1
+        try:
+            location = response.header_value("location")
+        except PlaywrightError:
+            location = None
+        if location and is_mega_url(location):
+            resolved.setdefault(content_id, location)
 
     navigation_failures = 0
     browser_unavailable = False
@@ -511,7 +541,14 @@ def resolve_batch(
                 attempted_ids.append(content_id)
                 target.on("request", lambda request, current_id=content_id: capture_request(request, current_id))
                 target.on("framenavigated", lambda frame, current_id=content_id, current_page=target: capture_navigation(frame, current_id, current_page))
-                target.on("response", lambda response, current_page=target: capture_response(response, current_page))
+                target.on(
+                    "response",
+                    lambda response, current_id=content_id, current_page=target: capture_response(
+                        response,
+                        current_id,
+                        current_page,
+                    ),
+                )
                 try:
                     target.goto(
                         "https://leakshaven.com/get-link?leak=" + quote(encrypted_content_id(source_page, content_id), safe=""),
@@ -563,7 +600,7 @@ def resolve_batch(
             break
         # Avoid presenting the source with a burst of application pages.
         if offset + batch_size < len(content_ids):
-            time.sleep(1)
+            time.sleep(inter_batch_delay)
 
     unresolved = len(attempted_ids) - len(resolved)
     LOGGER.info(
@@ -904,6 +941,7 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                         config.resolve_batch_size,
                         config.direct_navigation_timeout,
                         config.direct_settle_timeout,
+                        config.direct_request_interval_seconds,
                     )
                     if pending_ids
                     else ({}, [])

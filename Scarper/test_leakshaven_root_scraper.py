@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import os
 import sys
 import types
 import unittest
@@ -231,10 +232,11 @@ class _FakeBody:
 
 
 class _FakePage:
-    def __init__(self, redirect_url: str):
+    def __init__(self, redirect_url: str, response_location: str | None = None):
         self.url = "https://leakshaven.com/get-link"
         self.main_frame = object()
         self.redirect_url = redirect_url
+        self.response_location = response_location
         self.handlers: dict[str, object] = {}
         self.closed = False
 
@@ -244,12 +246,41 @@ class _FakePage:
     def goto(self, *_args: object, **_kwargs: object) -> None:
         handler = self.handlers["request"]
         handler(SimpleNamespace(url=self.redirect_url))  # type: ignore[operator]
+        if self.response_location:
+            response_handler = self.handlers["response"]
+            response_handler(_FakeResponse(self, self.response_location))  # type: ignore[operator]
 
     def locator(self, _selector: str) -> _FakeBody:
         return _FakeBody()
 
     def close(self) -> None:
         self.closed = True
+
+
+class _FakeResponse:
+    def __init__(self, page: _FakePage, location: str):
+        self.request = SimpleNamespace(
+            is_navigation_request=lambda: True,
+            frame=page.main_frame,
+        )
+        self.status = 302
+        self._location = location
+
+    def header_value(self, name: str) -> str | None:
+        return self._location if name.casefold() == "location" else None
+
+
+class _OriginPage:
+    def __init__(self) -> None:
+        self.goto_calls: list[tuple[object, object, object]] = []
+        self.waits: list[object] = []
+
+    def goto(self, url: object, *, wait_until: object, timeout: object) -> object:
+        self.goto_calls.append((url, wait_until, timeout))
+        return SimpleNamespace(status=200)
+
+    def wait_for_timeout(self, duration: object) -> None:
+        self.waits.append(duration)
 
 
 class _CrashingContext:
@@ -272,7 +303,51 @@ class _SinglePageContext:
         return self.page
 
 
+class _SequenceContext:
+    def __init__(self, pages: list[_FakePage]):
+        self.pages = list(pages)
+
+    def new_page(self) -> _FakePage:
+        return self.pages.pop(0)
+
+
+class ConfigTests(unittest.TestCase):
+    def test_default_resolution_pacing_is_serial_and_bounded(self) -> None:
+        with (
+            mock.patch.object(scraper, "load_dotenv"),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "DATABASE_URL": "postgresql://user:password@database.example:5432/app",
+                    "PROXY": "http://proxy.example:8080",
+                },
+                clear=True,
+            ),
+        ):
+            config = scraper.load_config()
+
+        self.assertEqual(config.resolve_batch_size, 1)
+        self.assertEqual(config.direct_request_interval_seconds, 2)
+        self.assertEqual(config.direct_settle_timeout, 12)
+
+
 class ResolverAccountingTests(unittest.TestCase):
+    def test_origin_bootstrap_uses_the_public_homepage_without_clearing_storage(self) -> None:
+        page = _OriginPage()
+
+        scraper.prepare_origin_page(page, timeout=45)
+
+        self.assertEqual(page.goto_calls, [("https://leakshaven.com/", "commit", 30_000)])
+        self.assertEqual(page.waits, [250])
+
+    def test_mega_url_accepts_current_and_legacy_formats(self) -> None:
+        self.assertTrue(scraper.is_mega_url("https://mega.nz/folder/abc#secret"))
+        self.assertTrue(scraper.is_mega_url("https://mega.nz/file/abc#secret"))
+        self.assertTrue(scraper.is_mega_url("https://mega.nz/#!abc!secret"))
+        self.assertTrue(scraper.is_mega_url("https://mega.co.nz/#F!abc!secret"))
+        self.assertFalse(scraper.is_mega_url("https://mega.nz/folder/abc"))
+        self.assertFalse(scraper.is_mega_url("https://example.com/folder/abc#secret"))
+
     def test_event_captured_destination_finishes_without_settle_wait(self) -> None:
         destination = "https://mega.nz/folder/abc#secret"
         page = _FakePage(destination)
@@ -296,6 +371,57 @@ class ResolverAccountingTests(unittest.TestCase):
         self.assertEqual(attempted, ["captured"])
         sleep.assert_not_called()
         self.assertTrue(page.closed)
+
+    def test_redirect_location_is_captured_without_a_mega_request(self) -> None:
+        destination = "https://mega.nz/folder/abc#secret"
+        page = _FakePage("https://leakshaven.com/get-link", response_location=destination)
+
+        with (
+            mock.patch.object(scraper, "encrypted_content_id", return_value="encrypted"),
+            mock.patch.object(scraper.time, "monotonic", side_effect=[0.0, 0.1]),
+            mock.patch.object(scraper.time, "sleep") as sleep,
+        ):
+            resolved, attempted = scraper.resolve_batch(
+                _SinglePageContext(page),
+                source_page=object(),
+                content_ids=["redirected"],
+                batch_size=1,
+                navigation_timeout=8,
+                settle_timeout=10,
+            )
+
+        self.assertEqual(resolved, {"redirected": destination})
+        self.assertEqual(attempted, ["redirected"])
+        sleep.assert_not_called()
+
+    def test_serial_batches_apply_the_configured_request_interval(self) -> None:
+        first = _FakePage("https://mega.nz/folder/first#secret")
+        second = _FakePage("https://mega.nz/folder/second#secret")
+
+        with (
+            mock.patch.object(scraper, "encrypted_content_id", return_value="encrypted"),
+            mock.patch.object(scraper.time, "monotonic", side_effect=[0.0, 0.1, 0.2, 0.3]),
+            mock.patch.object(scraper.time, "sleep") as sleep,
+        ):
+            resolved, attempted = scraper.resolve_batch(
+                _SequenceContext([first, second]),
+                source_page=object(),
+                content_ids=["first", "second"],
+                batch_size=1,
+                navigation_timeout=8,
+                settle_timeout=10,
+                inter_batch_delay=2,
+            )
+
+        self.assertEqual(
+            resolved,
+            {
+                "first": "https://mega.nz/folder/first#secret",
+                "second": "https://mega.nz/folder/second#secret",
+            },
+        )
+        self.assertEqual(attempted, ["first", "second"])
+        sleep.assert_called_once_with(2)
 
     def test_browser_crash_does_not_age_links_that_never_opened(self) -> None:
         destination = "https://mega.nz/folder/abc#secret"
