@@ -232,11 +232,19 @@ class _FakeBody:
 
 
 class _FakePage:
-    def __init__(self, redirect_url: str, response_location: str | None = None):
+    def __init__(
+        self,
+        redirect_url: str,
+        response_location: str | None = None,
+        anchor_urls: list[str] | None = None,
+        source: str = "",
+    ):
         self.url = "https://leakshaven.com/get-link"
         self.main_frame = object()
         self.redirect_url = redirect_url
         self.response_location = response_location
+        self.anchor_urls = anchor_urls or []
+        self.source = source
         self.handlers: dict[str, object] = {}
         self.closed = False
 
@@ -251,7 +259,12 @@ class _FakePage:
             response_handler(_FakeResponse(self, self.response_location))  # type: ignore[operator]
 
     def locator(self, _selector: str) -> _FakeBody:
+        if _selector == "a[href]":
+            return SimpleNamespace(evaluate_all=lambda _script: self.anchor_urls)  # type: ignore[return-value]
         return _FakeBody()
+
+    def content(self) -> str:
+        return self.source
 
     def close(self) -> None:
         self.closed = True
@@ -392,6 +405,56 @@ class ResolverAccountingTests(unittest.TestCase):
 
         self.assertEqual(resolved, {"redirected": destination})
         self.assertEqual(attempted, ["redirected"])
+        sleep.assert_not_called()
+
+    def test_document_destination_is_captured_from_a_rendered_link(self) -> None:
+        destination = "https://mega.nz/folder/abc#secret"
+        page = _FakePage(
+            "https://leakshaven.com/get-link",
+            anchor_urls=[destination],
+        )
+
+        with (
+            mock.patch.object(scraper, "encrypted_content_id", return_value="encrypted"),
+            mock.patch.object(scraper.time, "monotonic", side_effect=[0.0, 0.1]),
+            mock.patch.object(scraper.time, "sleep") as sleep,
+        ):
+            resolved, attempted = scraper.resolve_batch(
+                _SinglePageContext(page),
+                source_page=object(),
+                content_ids=["rendered"],
+                batch_size=1,
+                navigation_timeout=8,
+                settle_timeout=10,
+            )
+
+        self.assertEqual(resolved, {"rendered": destination})
+        self.assertEqual(attempted, ["rendered"])
+        sleep.assert_not_called()
+
+    def test_document_destination_is_captured_from_an_inline_script(self) -> None:
+        destination = "https://mega.nz/file/abc#secret"
+        page = _FakePage(
+            "https://leakshaven.com/get-link",
+            source=f'<script>window.destination = "{destination.replace("/", r"\/")}";</script>',
+        )
+
+        with (
+            mock.patch.object(scraper, "encrypted_content_id", return_value="encrypted"),
+            mock.patch.object(scraper.time, "monotonic", side_effect=[0.0, 0.1]),
+            mock.patch.object(scraper.time, "sleep") as sleep,
+        ):
+            resolved, attempted = scraper.resolve_batch(
+                _SinglePageContext(page),
+                source_page=object(),
+                content_ids=["inline-script"],
+                batch_size=1,
+                navigation_timeout=8,
+                settle_timeout=10,
+            )
+
+        self.assertEqual(resolved, {"inline-script": destination})
+        self.assertEqual(attempted, ["inline-script"])
         sleep.assert_not_called()
 
     def test_serial_batches_apply_the_configured_request_interval(self) -> None:

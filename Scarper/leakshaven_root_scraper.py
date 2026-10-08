@@ -14,6 +14,7 @@ import asyncio
 import base64
 from collections import Counter
 import hashlib
+from html import unescape as html_unescape
 import json
 import logging
 import math
@@ -200,6 +201,18 @@ def is_mega_url(url: str) -> bool:
     return parsed.path in {"", "/"} and bool(
         re.fullmatch(r"(?:F!|!)?[^!/#]+![^!/#]+", parsed.fragment)
     )
+
+
+def mega_url_in_text(value: Any) -> Optional[str]:
+    """Return a valid MEGA destination embedded in HTML, script, or link text."""
+    # JavaScript may escape a slash once (``\/``) or twice (``\\/``) before
+    # embedding the destination in the page source.
+    text = html_unescape(str(value or "")).replace("\\\\/", "/").replace("\\/", "/")
+    for candidate in re.findall(r"https?://[^\s\"'<>]+", text, flags=re.IGNORECASE):
+        candidate = candidate.rstrip(".,;:)]}")
+        if is_mega_url(candidate):
+            return candidate
+    return None
 
 
 def relative_age(value: Optional[str]) -> Optional[str]:
@@ -495,6 +508,30 @@ def resolve_batch(
         if location and is_mega_url(location):
             resolved.setdefault(content_id, location)
 
+    def capture_document_destination(page: Any, content_id: str) -> None:
+        """Capture public MEGA URLs rendered without a browser navigation.
+
+        Some source pages present the destination in a visible link or inline
+        script rather than immediately assigning ``window.location``.  Treat
+        an already-rendered public destination exactly like a redirect.
+        """
+        try:
+            urls = page.locator("a[href]").evaluate_all(
+                "(elements) => elements.map((element) => element.href)"
+            )
+        except (PlaywrightError, AttributeError):
+            urls = []
+        for url in urls:
+            if is_mega_url(str(url)):
+                resolved.setdefault(content_id, str(url))
+                return
+        try:
+            destination = mega_url_in_text(page.content())
+        except (PlaywrightError, AttributeError):
+            destination = None
+        if destination:
+            resolved.setdefault(content_id, destination)
+
     navigation_failures = 0
     browser_unavailable = False
 
@@ -568,6 +605,9 @@ def resolve_batch(
                         break
 
             pending = set(pages)
+            for content_id, page in pages.items():
+                if content_id not in resolved:
+                    capture_document_destination(page, content_id)
             deadline = time.monotonic() + settle_timeout
             while pending and time.monotonic() < deadline and not browser_unavailable:
                 for content_id in list(pending):
@@ -588,6 +628,9 @@ def resolve_batch(
                         pending.remove(content_id)
                 if pending:
                     time.sleep(0.2)
+            for content_id, page in pages.items():
+                if content_id not in resolved:
+                    capture_document_destination(page, content_id)
             for page in pages.values():
                 record_page_state(page)
         finally:
