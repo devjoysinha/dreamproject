@@ -97,3 +97,43 @@ CREATE INDEX IF NOT EXISTS model_tags_code_idx ON model_tags (code);
 CREATE INDEX IF NOT EXISTS media_items_created_at_idx ON media_items (created_at DESC NULLS LAST);
 CREATE INDEX IF NOT EXISTS model_open_links_model_position_idx ON model_open_links (model_id, position);
 CREATE INDEX IF NOT EXISTS model_open_links_content_position_idx ON model_open_links (content_id, position);
+
+CREATE TABLE IF NOT EXISTS visitor_credits (
+  id SERIAL PRIMARY KEY,
+  fingerprint TEXT NOT NULL UNIQUE,
+  credits INTEGER NOT NULL DEFAULT 30,
+  opens_used INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS chat_characters (
+  id TEXT PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  tagline TEXT NOT NULL,
+  persona TEXT NOT NULL,
+  image_url TEXT,
+  tags TEXT[] NOT NULL DEFAULT '{}',
+  level INTEGER NOT NULL DEFAULT 1,
+  category TEXT NOT NULL DEFAULT 'featured' CHECK (category IN ('hot', 'featured', 'new')),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS chat_characters_category_idx ON chat_characters (category);
+CREATE INDEX IF NOT EXISTS chat_characters_active_idx ON chat_characters (is_active) WHERE is_active = TRUE;
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id BIGSERIAL PRIMARY KEY,
+  character_id TEXT NOT NULL REFERENCES chat_characters(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS chat_messages_session_idx ON chat_messages (session_id, created_at);
+CREATE INDEX IF NOT EXISTS chat_messages_character_session_idx ON chat_messages (character_id, session_id, created_at);

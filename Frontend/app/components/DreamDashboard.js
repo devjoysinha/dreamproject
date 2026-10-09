@@ -38,7 +38,7 @@ export function DashboardBrand() {
 }
 
 const navGroups = [
-  ['Menu', [['Discover', 'compass', '/'], ['Explore', 'grid', '/creators'], ['Studio', 'wand'], ['Messages', 'message'], ['Account', 'user', '/auth/sign-in']]],
+  ['Menu', [['Discover', 'compass', '/'], ['Explore', 'grid', '/creators'], ['Studio', 'wand'], ['Chat', 'message', '/chat'], ['Account', 'user', '/auth/sign-in']]],
   ['Library', [['Collections', 'layers'], ['Creators', 'users', '/creators'], ['Favorites', 'heart'], ['Downloads', 'download']]],
   ['Other', [['Upgrade', 'crown', '/upgrade'], ['Rewards', 'gift']]],
 ];

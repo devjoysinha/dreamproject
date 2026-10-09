@@ -8,6 +8,7 @@ import { getCachedJson, setCachedJson } from './cache.js';
 import { authRouter } from './auth.js';
 import { createHumanSession, createLinkAccessTicket, readCookie, verifyHumanSession, verifyLinkAccessTicket } from './humanVerification.js';
 import { addCredits, COST_PER_OPEN, deductCredits, getOrCreateVisitor, INITIAL_CREDITS } from './credits.js';
+import { getCharacters, getCharacterBySlug, getChatHistory, streamChatResponse } from './chat.js';
 
 const listQuery = z.object({
   query: z.string().trim().max(120).optional(),
@@ -91,7 +92,7 @@ app.disable('x-powered-by');
 // The backend listens only on the loopback interface in production. Trust the
 // local reverse proxy for the original address supplied by Cloudflare.
 app.set('trust proxy', 'loopback');
-app.use(cors({ origin: config.FRONTEND_ORIGIN, methods: ['GET'] }));
+app.use(cors({ origin: config.FRONTEND_ORIGIN, methods: ['GET', 'POST'] }));
 app.use(express.json({
   limit: '100kb',
   verify: (req, _res, buf) => { req.rawBody = buf; },
@@ -498,6 +499,68 @@ app.get('/api/models/:slug', async (req, res, next) => {
     res.json(payload);
   } catch (error) {
     next(error);
+  }
+});
+
+const chatCategoryQuery = z.object({
+  category: z.enum(['hot', 'featured', 'new', 'all']).default('all'),
+});
+const chatSendBody = z.object({
+  message: z.string().trim().min(1).max(2000),
+  sessionId: z.string().min(8).max(128),
+});
+const chatHistoryQuery = z.object({
+  sessionId: z.string().min(8).max(128),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+app.get('/api/chat/characters', async (req, res, next) => {
+  const query = parseOrRespond(chatCategoryQuery, req.query, res);
+  if (!query) return;
+  try {
+    const characters = await getCharacters(query.category);
+    res.json({ items: characters });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/chat/characters/:slug', async (req, res, next) => {
+  try {
+    const character = await getCharacterBySlug(req.params.slug);
+    if (!character) return res.status(404).json({ error: 'Character not found' });
+    res.json(character);
+  } catch (error) { next(error); }
+});
+
+app.get('/api/chat/history/:slug', async (req, res, next) => {
+  const query = parseOrRespond(chatHistoryQuery, req.query, res);
+  if (!query) return;
+  try {
+    const character = await getCharacterBySlug(req.params.slug);
+    if (!character) return res.status(404).json({ error: 'Character not found' });
+    const messages = await getChatHistory(character.id, query.sessionId, query.limit);
+    res.json({ messages });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/chat/send/:slug', async (req, res, next) => {
+  const body = parseOrRespond(chatSendBody, req.body, res);
+  if (!body) return;
+  try {
+    const character = await getCharacterBySlug(req.params.slug);
+    if (!character) return res.status(404).json({ error: 'Character not found' });
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    for await (const chunk of streamChatResponse(character, body.sessionId, body.message)) {
+      res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
+    }
+    res.write('data: [DONE]\n\n');
+    res.end();
+  } catch (error) {
+    if (!res.headersSent) return next(error);
+    res.write(`data: ${JSON.stringify({ error: 'Stream interrupted' })}\n\n`);
+    res.end();
   }
 });
 

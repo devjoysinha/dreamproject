@@ -56,6 +56,9 @@ const schema = z.object({
   NOWPAYMENTS_API_KEY: z.string().optional().transform(v => v || undefined),
   NOWPAYMENTS_IPN_SECRET: z.string().optional().transform(v => v || undefined),
   NOWPAYMENTS_PRICE_USD: z.coerce.number().positive().default(0.22),
+  AWS_REGION: z.string().default('us-east-1'),
+  BEDROCK_MODEL_ID: z.string().default('amazon.nova-micro-v1:0'),
+  CHAT_MAX_HISTORY: z.coerce.number().int().min(2).max(100).default(20),
 });
 
 const parsedConfig = schema.parse({
