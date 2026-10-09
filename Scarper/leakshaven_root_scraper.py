@@ -80,6 +80,7 @@ class Config:
     asset_prefix: str
     asset_public_base_url: str
     max_image_bytes: int
+    max_proxy_sessions: int
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -170,6 +171,7 @@ def load_config() -> Config:
         asset_prefix=os.getenv("ASSET_PREFIX", "root-feed").strip("/"),
         asset_public_base_url=os.getenv("ASSET_PUBLIC_BASE_URL", "https://dzromswftdto7.cloudfront.net").rstrip("/"),
         max_image_bytes=env_int("MAX_IMAGE_BYTES", 12 * 1024 * 1024, 256 * 1024, 50 * 1024 * 1024),
+        max_proxy_sessions=env_int("MAX_PROXY_SESSIONS", 8, 1, 20),
     )
 
 
@@ -1024,8 +1026,10 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                     config.retry_cooldown_minutes,
                 )
                 LOGGER.info("Resolving %s pending direct links.", len(pending_ids))
-                resolved, attempted_ids = (
-                    resolve_batch(
+                all_resolved: Dict[str, str] = {}
+                all_attempted: List[str] = []
+                if pending_ids:
+                    resolved, attempted_ids = resolve_batch(
                         context,
                         page,
                         pending_ids,
@@ -1034,23 +1038,62 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                         config.direct_settle_timeout,
                         config.direct_request_interval_seconds,
                     )
-                    if pending_ids
-                    else ({}, [])
-                )
-                stats["attempted"] = len(attempted_ids)
-                stats["resolved"] = mark_resolved(connection, resolved)
-                stats["deferred"] = defer_unresolved(
-                    connection,
-                    attempted_ids,
-                    resolved,
-                )
-                stats["pending"] = pending_content_count(
-                    connection,
-                    root_window_ids,
-                    root_image_prefix,
-                )
+                    all_resolved.update(resolved)
+                    all_attempted.extend(attempted_ids)
+                    pending_ids = [cid for cid in pending_ids if cid not in all_resolved]
             else:
                 stats["associations"] = sum(len(value) for value in associations.values())
+
+        if not dry_run and pending_ids:
+            session_count = 1
+            while pending_ids and session_count < config.max_proxy_sessions:
+                session_count += 1
+                LOGGER.info("Rotating proxy session %d for %d remaining links.", session_count, len(pending_ids))
+                with camoufox_proxy(config.proxy_url) as browser_proxy, Camoufox(
+                    headless=True,
+                    proxy=browser_proxy,
+                    geoip=True,
+                    persistent_context=True,
+                    user_data_dir=str(ROOT / ".camoufox-root-profile"),
+                    block_images=False,
+                    enable_cache=False,
+                    firefox_user_prefs=LOW_BANDWIDTH_PREFS,
+                    i_know_what_im_doing=True,
+                ) as retry_context:
+                    retry_page = retry_context.pages[0] if retry_context.pages else retry_context.new_page()
+                    for stale in list(retry_context.pages)[1:]:
+                        stale.close()
+                    prepare_origin_page(retry_page, config.request_timeout)
+                    resolved, attempted_ids = resolve_batch(
+                        retry_context,
+                        retry_page,
+                        pending_ids,
+                        config.resolve_batch_size,
+                        config.direct_navigation_timeout,
+                        config.direct_settle_timeout,
+                        config.direct_request_interval_seconds,
+                    )
+                    all_resolved.update(resolved)
+                    all_attempted.extend(attempted_ids)
+                    if not resolved:
+                        LOGGER.info("No links resolved in session %d; stopping rotation.", session_count)
+                        break
+                    pending_ids = [cid for cid in pending_ids if cid not in all_resolved]
+
+        if not dry_run:
+            unique_attempted = list(dict.fromkeys(all_attempted))
+            stats["attempted"] = len(unique_attempted)
+            stats["resolved"] = mark_resolved(connection, all_resolved)
+            stats["deferred"] = defer_unresolved(
+                connection,
+                unique_attempted,
+                all_resolved,
+            )
+            stats["pending"] = pending_content_count(
+                connection,
+                root_window_ids,
+                root_image_prefix,
+            )
         duration = time.monotonic() - started
     LOGGER.info("Root feed complete: %s", json.dumps(stats, sort_keys=True))
     if config.notify_every_run and not dry_run:
