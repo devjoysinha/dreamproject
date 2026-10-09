@@ -340,7 +340,7 @@ class ConfigTests(unittest.TestCase):
             config = scraper.load_config()
 
         self.assertEqual(config.resolve_batch_size, 1)
-        self.assertEqual(config.direct_request_interval_seconds, 2)
+        self.assertEqual(config.direct_request_interval_seconds, 5)
         self.assertEqual(config.direct_settle_timeout, 12)
 
 
@@ -485,6 +485,40 @@ class ResolverAccountingTests(unittest.TestCase):
         )
         self.assertEqual(attempted, ["first", "second"])
         sleep.assert_called_once_with(2)
+
+    def test_validation_aborts_after_consecutive_failures(self) -> None:
+        class _ValidationPage(_FakePage):
+            def locator(self, selector: str) -> object:
+                if selector == "body":
+                    return SimpleNamespace(inner_text=lambda **_kw: "Just a moment... validating your browser")
+                return super().locator(selector)
+
+        pages = [
+            _ValidationPage("https://leakshaven.com/get-link"),
+            _ValidationPage("https://leakshaven.com/get-link"),
+            _ValidationPage("https://leakshaven.com/get-link"),
+        ]
+
+        with (
+            mock.patch.object(scraper, "encrypted_content_id", return_value="encrypted"),
+            mock.patch.object(scraper.time, "monotonic", side_effect=[
+                0.0, 100.0,    # Batch 1: deadline + settle expires immediately
+                200.0, 300.0,  # Batch 2: deadline + settle expires immediately
+            ]),
+            mock.patch.object(scraper.time, "sleep"),
+        ):
+            resolved, attempted = scraper.resolve_batch(
+                _SequenceContext(pages),
+                source_page=_OriginPage(),
+                content_ids=["a", "b", "c"],
+                batch_size=1,
+                navigation_timeout=8,
+                settle_timeout=10,
+            )
+
+        self.assertEqual(resolved, {})
+        self.assertEqual(len(attempted), 2)
+        self.assertNotIn("c", attempted)
 
     def test_browser_crash_does_not_age_links_that_never_opened(self) -> None:
         destination = "https://mega.nz/folder/abc#secret"

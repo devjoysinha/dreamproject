@@ -155,7 +155,7 @@ def load_config() -> Config:
         # pages was consistently followed by source validation after the first
         # batch, leaving most of the feed unresolved.
         resolve_batch_size=env_int("DIRECT_LINK_BATCH_SIZE", 1, 1, 6),
-        direct_request_interval_seconds=env_int("DIRECT_LINK_INTERVAL_SECONDS", 2, 1, 30),
+        direct_request_interval_seconds=env_int("DIRECT_LINK_INTERVAL_SECONDS", 5, 1, 30),
         direct_navigation_timeout=env_int("DIRECT_LINK_NAVIGATION_TIMEOUT_SECONDS", 15, 8, 30),
         # A genuine redirect is normally observed immediately by an event
         # handler.  Keep failures bounded so validation pages do not consume
@@ -563,6 +563,22 @@ def resolve_batch(
         else:
             final_states["empty"] += 1
 
+    def is_validation_page(page_ref: Any) -> bool:
+        try:
+            body = page_ref.locator("body").inner_text(timeout=2000).casefold()
+        except (PlaywrightError, PlaywrightTimeoutError):
+            return False
+        return (
+            "validating" in body
+            or "verify you are human" in body
+            or "just a moment" in body
+            or "recaptcha" in body
+            or "access denied" in body
+            or "error 1020" in body
+        )
+
+    consecutive_validation_failures = 0
+
     for offset in range(0, len(content_ids), batch_size):
         pages: Dict[str, Any] = {}
         batch_ids = content_ids[offset : offset + batch_size]
@@ -631,6 +647,12 @@ def resolve_batch(
             for content_id, page in pages.items():
                 if content_id not in resolved:
                     capture_document_destination(page, content_id)
+            batch_hit_validation = False
+            for content_id in batch_ids:
+                if content_id not in resolved and content_id in pages:
+                    if is_validation_page(pages[content_id]):
+                        batch_hit_validation = True
+                        break
             for page in pages.values():
                 record_page_state(page)
         finally:
@@ -639,11 +661,37 @@ def resolve_batch(
                     page.close()
                 except PlaywrightError:
                     pass
+        batch_resolved_any = any(cid in resolved for cid in batch_ids)
+        if batch_hit_validation and not batch_resolved_any:
+            consecutive_validation_failures += 1
+            LOGGER.warning(
+                "Source validation detected on batch %d (consecutive failures: %d).",
+                offset // batch_size + 1,
+                consecutive_validation_failures,
+            )
+        elif batch_resolved_any:
+            consecutive_validation_failures = 0
+        if consecutive_validation_failures >= 2:
+            remaining = len(content_ids) - (offset + batch_size)
+            LOGGER.warning(
+                "Aborting resolution after %d consecutive validation failures; "
+                "%d links deferred to next run.",
+                consecutive_validation_failures,
+                max(0, remaining),
+            )
+            break
         if browser_unavailable:
             break
-        # Avoid presenting the source with a burst of application pages.
         if offset + batch_size < len(content_ids):
-            time.sleep(inter_batch_delay)
+            if consecutive_validation_failures > 0:
+                try:
+                    prepare_origin_page(source_page, navigation_timeout)
+                except (PlaywrightError, PlaywrightTimeoutError, RuntimeError) as error:
+                    LOGGER.warning("Origin recovery failed: %s", redact_error(error))
+                backoff = inter_batch_delay * (2 ** consecutive_validation_failures)
+                time.sleep(min(backoff, 30))
+            else:
+                time.sleep(inter_batch_delay)
 
     unresolved = len(attempted_ids) - len(resolved)
     LOGGER.info(
