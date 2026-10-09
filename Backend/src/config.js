@@ -51,10 +51,8 @@ const schema = z.object({
   HUMAN_VERIFICATION_COOKIE_NAME: z.string().regex(/^[a-zA-Z0-9_-]+$/).default('lp_human'),
   HUMAN_VERIFICATION_TTL_SECONDS: z.coerce.number().int().min(300).max(60 * 60 * 24).default(60 * 60 * 12),
   LINK_ACCESS_TTL_SECONDS: z.coerce.number().int().min(30).max(600).default(120),
-  TURNSTILE_SECRET_KEY: z.string().min(1).optional(),
-  TURNSTILE_EXPECTED_HOSTNAMES: z.string().optional().transform(value => value
-    ? value.split(',').map(hostname => hostname.trim().toLowerCase()).filter(Boolean)
-    : []),
+  CAP_API_ENDPOINT: z.string().url().optional(),
+  CAP_SECRET_KEY: z.string().min(1).optional(),
 });
 
 const parsedConfig = schema.parse({
@@ -67,7 +65,7 @@ const parsedConfig = schema.parse({
 });
 
 if (parsedConfig.HUMAN_VERIFICATION_ENABLED) {
-  const required = ['HUMAN_VERIFICATION_SECRET', 'TURNSTILE_SECRET_KEY'];
+  const required = ['HUMAN_VERIFICATION_SECRET', 'CAP_API_ENDPOINT', 'CAP_SECRET_KEY'];
   const missing = required.filter(key => !parsedConfig[key]);
   if (missing.length) throw new Error(`Human verification is enabled but ${missing.join(', ')} is missing.`);
 }

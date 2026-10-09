@@ -123,20 +123,17 @@ function isSafeExternalUrl(value) {
   }
 }
 
-async function verifyTurnstile(token, remoteIp) {
-  const form = new URLSearchParams({ secret: config.TURNSTILE_SECRET_KEY, response: token });
-  if (remoteIp) form.set('remoteip', remoteIp);
-  const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+async function verifyCap(token) {
+  const endpoint = config.CAP_API_ENDPOINT.replace(/\/$/, '');
+  const response = await fetch(`${endpoint}/siteverify`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: form,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ secret: config.CAP_SECRET_KEY, response: token }),
     signal: AbortSignal.timeout(5_000),
   });
   if (!response.ok) return { success: false };
   const result = await response.json();
-  if (!result?.success) return { success: false };
-  if (config.TURNSTILE_EXPECTED_HOSTNAMES.length && !config.TURNSTILE_EXPECTED_HOSTNAMES.includes(result.hostname?.toLowerCase())) return { success: false };
-  return { success: true };
+  return { success: result?.success === true };
 }
 
 app.get('/health', async (_req, res, next) => {
@@ -160,7 +157,7 @@ app.post('/api/open-links/:contentId/access', async (req, res, next) => {
   try {
     if (!hasHumanVerification(req)) {
       if (!body.data.token) return res.status(403).json({ error: 'Browser verification required.', verificationRequired: true });
-      const outcome = await verifyTurnstile(body.data.token, req.ip);
+      const outcome = await verifyCap(body.data.token);
       if (!outcome.success) return res.status(403).json({ error: 'Verification was not accepted. Please try again.', verificationRequired: true });
       setHumanVerificationCookie(res);
     }

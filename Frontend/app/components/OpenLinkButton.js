@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import styles from './OpenLinkButton.module.css';
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
-const turnstileScript = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+const capApiEndpoint = process.env.NEXT_PUBLIC_CAP_API_ENDPOINT || '';
 
 function isLinkRedirect(value) {
   return typeof value === 'string' && /^\/api\/open-links\/[^/]+\/redirect\?ticket=/.test(value);
@@ -37,14 +37,27 @@ function PreviewCard({ card }) {
   );
 }
 
+function ensureCapScript() {
+  if (customElements.get('cap-widget')) return Promise.resolve();
+  if (!document.querySelector('script[data-cap-widget]')) {
+    const s = document.createElement('script');
+    s.type = 'module';
+    s.setAttribute('data-cap-widget', '');
+    s.textContent = 'import "https://cdn.jsdelivr.net/npm/cap-widget";';
+    document.head.appendChild(s);
+  }
+  return Promise.race([
+    customElements.whenDefined('cap-widget'),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 12_000)),
+  ]);
+}
+
 export default function OpenLinkButton({ contentId, card, className = '', children }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [phase, setPhase] = useState('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const challenge = useRef(null);
-  const widgetId = useRef(null);
   const tokenHandler = useRef(null);
-  const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
   const busy = phase === 'preparing' || phase === 'validating' || phase === 'redirecting';
 
@@ -109,11 +122,9 @@ export default function OpenLinkButton({ contentId, card, className = '', childr
       if (result.redirectUrl) return openRedirect(result.redirectUrl);
       setPhase('error');
       setErrorMsg(result.error);
-      if (widgetId.current !== null && window.turnstile) window.turnstile.reset(widgetId.current);
     } catch {
       setPhase('error');
       setErrorMsg('We could not verify this browser. Please try again.');
-      if (widgetId.current !== null && window.turnstile) window.turnstile.reset(widgetId.current);
     }
   };
 
@@ -128,51 +139,43 @@ export default function OpenLinkButton({ contentId, card, className = '', childr
 
   useEffect(() => {
     if (!dialogOpen || phase !== 'challenge') return undefined;
-    if (!siteKey) {
+    if (!capApiEndpoint) {
       setPhase('error');
       setErrorMsg('Browser verification is not configured yet. Please try again shortly.');
       return undefined;
     }
 
     let active = true;
+
     const renderWidget = () => {
-      if (!active || !challenge.current || !window.turnstile || widgetId.current !== null) return;
-      widgetId.current = window.turnstile.render(challenge.current, {
-        sitekey: siteKey,
-        theme: 'dark',
-        callback: token => tokenHandler.current?.(token),
-        'error-callback': () => {
-          setPhase('error');
-          setErrorMsg('The security check could not load. Check your connection and try again.');
-        },
-        'expired-callback': () => setErrorMsg('The security check expired. Please complete it again.'),
+      if (!active || !challenge.current) return;
+      challenge.current.innerHTML = '';
+      const widget = document.createElement('cap-widget');
+      widget.setAttribute('data-cap-api-endpoint', capApiEndpoint);
+      widget.style.cssText = '--cap-background:rgba(30,30,35,.9);--cap-border-color:rgba(148,163,184,.18);--cap-border-radius:12px;--cap-color:#e8ecf0;--cap-spinner-color:#7de3ff;--cap-spinner-background-color:rgba(148,163,184,.2);--cap-checkbox-background:rgba(148,163,184,.1);--cap-checkbox-border:1px solid rgba(148,163,184,.3);--cap-font:system-ui,-apple-system,sans-serif';
+      widget.addEventListener('solve', event => tokenHandler.current?.(event.detail.token));
+      widget.addEventListener('error', event => {
+        if (!active) return;
+        setPhase('error');
+        setErrorMsg(event.detail?.message || 'The security check failed. Please try again.');
       });
+      challenge.current.appendChild(widget);
     };
 
-    let script = document.querySelector(`script[src="${turnstileScript}"]`);
-    if (window.turnstile) renderWidget();
-    else {
-      if (!script) {
-        script = document.createElement('script');
-        script.src = turnstileScript;
-        script.async = true;
-        script.defer = true;
-        document.head.appendChild(script);
-      }
-      script.addEventListener('load', renderWidget);
-      script.addEventListener('error', () => {
-        setPhase('error');
-        setErrorMsg('The security check could not load. Check your connection and try again.');
+    ensureCapScript()
+      .then(() => { if (active) renderWidget(); })
+      .catch(() => {
+        if (active) {
+          setPhase('error');
+          setErrorMsg('The security check could not load. Check your connection and try again.');
+        }
       });
-    }
 
     return () => {
       active = false;
-      script?.removeEventListener('load', renderWidget);
-      if (widgetId.current !== null && window.turnstile) window.turnstile.remove(widgetId.current);
-      widgetId.current = null;
+      if (challenge.current) challenge.current.innerHTML = '';
     };
-  }, [dialogOpen, phase, siteKey]);
+  }, [dialogOpen, phase]);
 
   const dialog = dialogOpen && typeof document !== 'undefined' ? createPortal(
     <div className={styles.overlay} role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeDialog(); }}>
