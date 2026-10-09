@@ -11,20 +11,20 @@ function isLinkRedirect(value) {
   return typeof value === 'string' && /^\/api\/open-links\/[^/]+\/redirect\?ticket=/.test(value);
 }
 
-function ShieldIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 7v5c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V7l-8-4Z" /><path d="M9 12.2 11.1 14l4.2-4.3" /></svg>;
+function Spinner() {
+  return <svg className={styles.spinner} viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /></svg>;
 }
 
 export default function OpenLinkButton({ contentId, className = '', children }) {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState('');
-  const [failed, setFailed] = useState(false);
+  const [phase, setPhase] = useState('idle');
+  const [errorMsg, setErrorMsg] = useState('');
   const challenge = useRef(null);
   const widgetId = useRef(null);
-  const closeButton = useRef(null);
   const tokenHandler = useRef(null);
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+
+  const busy = phase === 'preparing' || phase === 'validating' || phase === 'redirecting';
 
   const requestAccess = async token => {
     const response = await fetch(`${apiBase}/api/open-links/${encodeURIComponent(contentId)}/access`, {
@@ -42,58 +42,56 @@ export default function OpenLinkButton({ contentId, className = '', children }) 
   };
 
   const openRedirect = redirectUrl => {
+    setPhase('redirecting');
     window.location.assign(redirectUrl);
   };
 
   const closeDialog = () => {
     if (busy) return;
     setDialogOpen(false);
-    setFailed(false);
-    setStatus('');
+    setPhase('idle');
+    setErrorMsg('');
   };
 
   const start = async () => {
     if (!contentId || busy) return;
-    setBusy(true);
-    setFailed(false);
-    setStatus('Preparing your secure link…');
+    setPhase('preparing');
+    setErrorMsg('');
     try {
       const result = await requestAccess();
-      if (result.redirectUrl) return openRedirect(result.redirectUrl);
+      if (result.redirectUrl) {
+        setDialogOpen(true);
+        return openRedirect(result.redirectUrl);
+      }
       if (result.verificationRequired) {
         setDialogOpen(true);
-        setStatus('Complete the security check to open this link.');
+        setPhase('challenge');
         return;
       }
       setDialogOpen(true);
-      setFailed(true);
-      setStatus(result.error);
+      setPhase('error');
+      setErrorMsg(result.error);
     } catch {
       setDialogOpen(true);
-      setFailed(true);
-      setStatus('We could not prepare this link. Check your connection and try again.');
-    } finally {
-      setBusy(false);
+      setPhase('error');
+      setErrorMsg('We could not prepare this link. Check your connection and try again.');
     }
   };
 
   const completeChallenge = async token => {
     if (!token || busy) return;
-    setBusy(true);
-    setFailed(false);
-    setStatus('Verifying your browser…');
+    setPhase('validating');
+    setErrorMsg('');
     try {
       const result = await requestAccess(token);
       if (result.redirectUrl) return openRedirect(result.redirectUrl);
-      setFailed(true);
-      setStatus(result.error);
+      setPhase('error');
+      setErrorMsg(result.error);
       if (widgetId.current !== null && window.turnstile) window.turnstile.reset(widgetId.current);
     } catch {
-      setFailed(true);
-      setStatus('We could not verify this browser. Please try again.');
+      setPhase('error');
+      setErrorMsg('We could not verify this browser. Please try again.');
       if (widgetId.current !== null && window.turnstile) window.turnstile.reset(widgetId.current);
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -101,17 +99,16 @@ export default function OpenLinkButton({ contentId, className = '', children }) 
 
   useEffect(() => {
     if (!dialogOpen) return undefined;
-    closeButton.current?.focus();
     const closeOnEscape = event => { if (event.key === 'Escape') closeDialog(); };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [dialogOpen, busy]);
 
   useEffect(() => {
-    if (!dialogOpen || failed) return undefined;
+    if (!dialogOpen || phase !== 'challenge') return undefined;
     if (!siteKey) {
-      setFailed(true);
-      setStatus('Browser verification is not configured yet. Please try again shortly.');
+      setPhase('error');
+      setErrorMsg('Browser verification is not configured yet. Please try again shortly.');
       return undefined;
     }
 
@@ -123,10 +120,10 @@ export default function OpenLinkButton({ contentId, className = '', children }) 
         theme: 'dark',
         callback: token => tokenHandler.current?.(token),
         'error-callback': () => {
-          setFailed(true);
-          setStatus('The security check could not load. Check your connection and try again.');
+          setPhase('error');
+          setErrorMsg('The security check could not load. Check your connection and try again.');
         },
-        'expired-callback': () => setStatus('The security check expired. Please complete it again.'),
+        'expired-callback': () => setErrorMsg('The security check expired. Please complete it again.'),
       });
     };
 
@@ -142,8 +139,8 @@ export default function OpenLinkButton({ contentId, className = '', children }) 
       }
       script.addEventListener('load', renderWidget);
       script.addEventListener('error', () => {
-        setFailed(true);
-        setStatus('The security check could not load. Check your connection and try again.');
+        setPhase('error');
+        setErrorMsg('The security check could not load. Check your connection and try again.');
       });
     }
 
@@ -153,19 +150,40 @@ export default function OpenLinkButton({ contentId, className = '', children }) 
       if (widgetId.current !== null && window.turnstile) window.turnstile.remove(widgetId.current);
       widgetId.current = null;
     };
-  }, [dialogOpen, failed, siteKey]);
+  }, [dialogOpen, phase, siteKey]);
 
   const dialog = dialogOpen && typeof document !== 'undefined' ? createPortal(
     <div className={styles.overlay} role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeDialog(); }}>
-      <section className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="open-link-verification-title" aria-describedby="open-link-verification-status">
-        <button ref={closeButton} className={styles.close} type="button" aria-label="Close verification" onClick={closeDialog} disabled={busy}>×</button>
-        <div className={styles.icon}><ShieldIcon /></div>
-        <p className={styles.eyebrow}>SECURE LINK</p>
-        <h2 id="open-link-verification-title">Verify to open this link</h2>
-        <p className={styles.copy}>A quick check helps keep automated tools from collecting destination links.</p>
+      <section className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="open-link-verification-title">
+
+        {!busy && <button className={styles.close} type="button" aria-label="Close verification" onClick={closeDialog}>×</button>}
+
+        <p id="open-link-verification-title" className={styles.redirectMsg}>
+          We are redirecting you to the content you requested…
+        </p>
+
         <div ref={challenge} className={styles.challenge} />
-        <p id="open-link-verification-status" className={`${styles.status}${failed ? ` ${styles.statusError}` : ''}`} role="status" aria-live="polite">{status}</p>
-        {failed && <button className={styles.retry} type="button" onClick={() => { setFailed(false); setStatus('Complete the security check to open this link.'); }}>Try again</button>}
+
+        {(phase === 'validating' || phase === 'redirecting') && (
+          <div className={styles.validating} role="status" aria-live="polite">
+            <Spinner />
+            <span>{phase === 'redirecting' ? 'Redirecting' : 'Validating'}</span>
+          </div>
+        )}
+
+        {phase === 'preparing' && (
+          <div className={styles.validating} role="status" aria-live="polite">
+            <Spinner />
+            <span>Preparing</span>
+          </div>
+        )}
+
+        {phase === 'error' && (
+          <div className={styles.errorBlock}>
+            <p className={styles.errorText}>{errorMsg}</p>
+            <button className={styles.retry} type="button" onClick={() => { setPhase('challenge'); setErrorMsg(''); }}>Try again</button>
+          </div>
+        )}
       </section>
     </div>,
     document.body,
