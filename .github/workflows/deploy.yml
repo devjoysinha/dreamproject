@@ -29,12 +29,13 @@ jobs:
             --parameters 'commands=[
               "set -e",
               "cd /opt/dreamproject",
-              "git fetch origin",
-              "git checkout main",
-              "git pull origin main",
-              "cd Frontend && npm run build",
-              "sudo systemctl restart dream-frontend",
-              "sudo systemctl restart dream-backend",
+              "sudo -u ec2-user git config --global --add safe.directory /opt/dreamproject",
+              "sudo -u ec2-user git fetch origin",
+              "sudo -u ec2-user git checkout main",
+              "sudo -u ec2-user git pull origin main",
+              "cd Frontend && sudo -u ec2-user npm run build",
+              "systemctl restart dream-frontend",
+              "systemctl restart dream-backend",
               "echo DEPLOY_OK"
             ]' \
             --query 'Command.CommandId' \
