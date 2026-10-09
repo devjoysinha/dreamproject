@@ -170,7 +170,7 @@ app.post('/api/open-links/:contentId/access', async (req, res, next) => {
           creditsRequired: true,
           credits: visitor.credits,
           opensUsed: visitor.opens_used,
-          paymentUrl: 'https://pay.leakporns.com/',
+          paymentUrl: 'https://nowpayments.io/',
         });
       }
     }
@@ -196,7 +196,7 @@ app.post('/api/open-links/:contentId/access', async (req, res, next) => {
           error: 'You have used all your free credits. Purchase more to continue.',
           creditsRequired: true,
           credits: 0,
-          paymentUrl: 'https://pay.leakporns.com/',
+          paymentUrl: 'https://nowpayments.io/',
         });
       }
     }
@@ -238,55 +238,60 @@ app.get('/api/credits', async (req, res, next) => {
   if (!fp || fp.length < 16 || fp.length > 128) return res.status(400).json({ error: 'Invalid fingerprint.' });
   try {
     const visitor = await getOrCreateVisitor(fp);
-    res.json({ credits: visitor.credits, opensUsed: visitor.opens_used, costPerOpen: COST_PER_OPEN, paymentUrl: 'https://pay.leakporns.com/' });
+    res.json({ credits: visitor.credits, opensUsed: visitor.opens_used, costPerOpen: COST_PER_OPEN, paymentUrl: 'https://nowpayments.io/' });
   } catch (error) {
     next(error);
   }
 });
 
 app.post('/api/payments/create', async (req, res, next) => {
-  if (!config.PAYRAM_API_URL || !config.PAYRAM_API_KEY) return res.status(503).json({ error: 'Payments are not configured.' });
+  if (!config.NOWPAYMENTS_API_KEY) return res.status(503).json({ error: 'Payments are not configured.' });
   const body = z.object({ fingerprint: z.string().min(16).max(128) }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: 'Invalid request.' });
   try {
-    const payRes = await fetch(`${config.PAYRAM_API_URL}/api/v1/payment`, {
+    const orderId = `lp-${body.data.fingerprint}-${Date.now()}`;
+    const callbackBase = config.FRONTEND_ORIGIN.replace(/:\d+$/, '').replace('http://localhost', 'https://leakporns.com');
+    const invoiceRes = await fetch('https://api.nowpayments.io/v1/invoice', {
       method: 'POST',
-      headers: { 'API-Key': config.PAYRAM_API_KEY, 'Content-Type': 'application/json' },
+      headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        customerID: body.data.fingerprint,
-        customerEmail: `${body.data.fingerprint}@visitor.leakporns.com`,
-        amountInUSD: config.PAYRAM_PRICE_USD,
-        invoiceID: `lp-credits-${body.data.fingerprint}-${Date.now()}`,
+        price_amount: config.NOWPAYMENTS_PRICE_USD,
+        price_currency: 'usd',
+        order_id: orderId,
+        order_description: `Link credits for visitor ${body.data.fingerprint.slice(0, 8)}`,
+        ipn_callback_url: `${callbackBase}/api/payments/webhook`,
+        success_url: `${callbackBase}/?paid=1`,
+        cancel_url: `${callbackBase}/`,
       }),
     });
-    const payData = await payRes.json();
-    if (!payRes.ok) return res.status(502).json({ error: 'Payment service error.' });
-    res.json({ paymentUrl: payData.url, referenceId: payData.reference_id });
+    const invoiceData = await invoiceRes.json();
+    if (!invoiceRes.ok) return res.status(502).json({ error: 'Payment service error.' });
+    res.json({ paymentUrl: invoiceData.invoice_url, invoiceId: invoiceData.id });
   } catch (error) {
     next(error);
   }
 });
 
+function verifyNowPaymentsSig(body, signature, secret) {
+  const sorted = Object.keys(body).sort().reduce((acc, key) => { acc[key] = body[key]; return acc; }, {});
+  const expected = crypto.createHmac('sha512', secret).update(JSON.stringify(sorted)).digest('hex');
+  if (signature.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+}
+
 app.post('/api/payments/webhook', async (req, res, next) => {
-  if (!config.PAYRAM_API_KEY) return res.status(503).end();
-  const signature = req.headers['x-payram-signature'];
-  if (signature) {
-    const raw = req.rawBody;
-    if (!raw) return res.status(400).json({ error: 'Missing body.' });
-    const expected = 'sha256=' + crypto.createHmac('sha256', config.PAYRAM_API_KEY).update(raw).digest('hex');
-    if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
-      return res.status(401).json({ error: 'Invalid signature.' });
-    }
-  } else {
-    const apiKey = req.headers['api-key'];
-    if (apiKey !== config.PAYRAM_API_KEY) return res.status(401).json({ error: 'Unauthorized.' });
+  if (!config.NOWPAYMENTS_IPN_SECRET) return res.status(503).end();
+  const signature = req.headers['x-nowpayments-sig'];
+  if (!signature || !verifyNowPaymentsSig(req.body, signature, config.NOWPAYMENTS_IPN_SECRET)) {
+    return res.status(401).json({ error: 'Invalid signature.' });
   }
   try {
     const event = req.body;
-    if (event.status === 'FILLED' || event.status === 'OVER_FILLED') {
-      const fp = event.customer_id;
-      if (fp && fp.length >= 16) {
-        await addCredits(fp, COST_PER_OPEN);
+    if (event.payment_status === 'finished' || event.payment_status === 'confirmed') {
+      const orderId = event.order_id || '';
+      const match = orderId.match(/^lp-(.{16,128})-\d+$/);
+      if (match) {
+        await addCredits(match[1], COST_PER_OPEN);
       }
     }
     res.status(200).json({ ok: true });

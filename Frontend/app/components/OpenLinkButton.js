@@ -108,7 +108,7 @@ export default function OpenLinkButton({ contentId, card, className = '', childr
       if (result.creditsRequired) {
         setDialogOpen(true);
         setPhase('payment');
-        setErrorMsg(result.paymentUrl || 'https://pay.leakporns.com/');
+        setErrorMsg(result.paymentUrl || 'https://nowpayments.io/');
         return;
       }
       if (result.verificationRequired) {
@@ -135,7 +135,7 @@ export default function OpenLinkButton({ contentId, card, className = '', childr
       if (result.redirectUrl) return openRedirect(result.redirectUrl);
       if (result.creditsRequired) {
         setPhase('payment');
-        setErrorMsg(result.paymentUrl || 'https://pay.leakporns.com/');
+        setErrorMsg(result.paymentUrl || 'https://nowpayments.io/');
         return;
       }
       setPhase('error');
@@ -239,11 +239,11 @@ export default function OpenLinkButton({ contentId, card, className = '', childr
                   window.open(data.paymentUrl, '_blank', 'noopener');
                   setPhase('payment');
                 } else {
-                  window.open('https://pay.leakporns.com/', '_blank', 'noopener');
+                  window.open('https://nowpayments.io/', '_blank', 'noopener');
                   setPhase('payment');
                 }
               } catch {
-                window.open('https://pay.leakporns.com/', '_blank', 'noopener');
+                window.open('https://nowpayments.io/', '_blank', 'noopener');
                 setPhase('payment');
               }
             }}>Pay ₹19 to Continue</button>
