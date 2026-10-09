@@ -15,7 +15,29 @@ function Spinner() {
   return <svg className={styles.spinner} viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /></svg>;
 }
 
-export default function OpenLinkButton({ contentId, className = '', children }) {
+function InfoIcon() {
+  return <svg className={styles.cardInfoIcon} viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>;
+}
+
+function PreviewCard({ card }) {
+  if (!card) return null;
+  const meta = [card.sizeDisplay, card.images != null && `${card.images} imgs`, card.videos != null && `${card.videos} videos`, card.relativeAge].filter(Boolean).join(' · ');
+  return (
+    <div className={styles.previewCard}>
+      {card.imageUrl && <div className={styles.previewImageWrap}>
+        <img className={styles.previewImage} src={card.imageUrl} alt="" loading="eager" />
+        {card.isTrending && <span className={styles.previewTrending}>TRENDING</span>}
+        <button className={styles.previewMore} type="button" aria-label="More" tabIndex={-1}>···</button>
+      </div>}
+      <div className={styles.previewMeta}>
+        <p className={styles.previewTitle}>{card.title || card.modelName || 'Content'}</p>
+        {meta && <p className={styles.previewStats}>{meta} <InfoIcon /></p>}
+      </div>
+    </div>
+  );
+}
+
+export default function OpenLinkButton({ contentId, card, className = '', children }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [phase, setPhase] = useState('idle');
   const [errorMsg, setErrorMsg] = useState('');
@@ -184,6 +206,8 @@ export default function OpenLinkButton({ contentId, className = '', children }) 
             <button className={styles.retry} type="button" onClick={() => { setPhase('challenge'); setErrorMsg(''); }}>Try again</button>
           </div>
         )}
+
+        <PreviewCard card={card} />
       </section>
     </div>,
     document.body,
