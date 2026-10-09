@@ -12,7 +12,7 @@ async function getAvailableModels() {
       endpoint.searchParams.set('sort', 'name');
       endpoint.searchParams.set('limit', String(pageSize));
       endpoint.searchParams.set('offset', String(offset));
-      const response = await fetch(endpoint, { headers: internalApiHeaders(), next: { revalidate: 3600 } });
+      const response = await fetch(endpoint, { next: { revalidate: 3600 } });
       if (!response.ok) break;
 
       const data = await response.json();
@@ -52,4 +52,3 @@ export default async function sitemap() {
     })),
   ];
 }
-import { internalApiHeaders } from './lib/backend';

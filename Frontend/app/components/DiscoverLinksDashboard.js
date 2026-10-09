@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { DashboardBrand, DashboardIcon, DashboardSidebar } from './DreamDashboard';
+import OpenLinkButton from './OpenLinkButton';
 import styles from './DreamDashboard.module.css';
 
 // Keep browser requests on the current origin. Next rewrites /api to the
@@ -22,7 +23,7 @@ function LinkPreview({ item, onClose }) {
     <section className={styles.mediaDialog} role="dialog" aria-modal="true" aria-labelledby="discover-link-title" onClick={event => event.stopPropagation()}>
       <button className={styles.dialogClose} type="button" aria-label="Close link preview" onClick={onClose}><DashboardIcon name="close" /></button>
       <div className={styles.mediaDialogVisual}>{item.imageUrl ? <img src={item.imageUrl} alt="" /> : <div className={styles.mediaFallback}><DashboardIcon name="image" size={35} /></div>}{item.isTrending && <span className={styles.discoverTrending}>Trending</span>}</div>
-      <div className={styles.mediaDialogCopy}><span>OPEN LINK</span><h2 id="discover-link-title">{title}</h2><p>{item.modelName || 'Independent collection'} · {item.relativeAge || 'Recently added'}</p><dl><div><small>Media</small><strong>{formatMedia(item)}</strong></div><div><small>Size</small><strong>{item.sizeDisplay || '—'}</strong></div></dl><div className={styles.mediaDialogActions}>{item.megaUrl ? <a href={item.megaUrl} target="_blank" rel="noreferrer">Open link <DashboardIcon name="arrow" size={16} /></a> : <Link href={profileHref}>View profile <DashboardIcon name="user" size={16} /></Link>}<Link href={profileHref}>Creator profile</Link></div></div>
+      <div className={styles.mediaDialogCopy}><span>OPEN LINK</span><h2 id="discover-link-title">{title}</h2><p>{item.modelName || 'Independent collection'} · {item.relativeAge || 'Recently added'}</p><dl><div><small>Media</small><strong>{formatMedia(item)}</strong></div><div><small>Size</small><strong>{item.sizeDisplay || '—'}</strong></div></dl><div className={styles.mediaDialogActions}><OpenLinkButton className={styles.mediaPrimaryLink} contentId={item.id}>Open link <DashboardIcon name="arrow" size={16} /></OpenLinkButton><Link href={profileHref}>Creator profile</Link></div></div>
     </section>
   </div>;
 }
@@ -43,7 +44,7 @@ function OpenLinkCard({ item, saved, onSave, onPreview, eager = false }) {
       <h2 title={title}>{title}</h2>
       <p>{item.sizeDisplay || '—'}<span>{formatMedia(item)}</span></p>
       <small><DashboardIcon name="clock" size={13} />{item.relativeAge || 'Recently added'}</small>
-      <div className={styles.discoverLinkActions}>{item.megaUrl ? <a href={item.megaUrl} target="_blank" rel="noreferrer">Open link <DashboardIcon name="arrow" size={14} /></a> : <Link href={profileHref}>Open link <DashboardIcon name="arrow" size={14} /></Link>}<button type="button" aria-label={`${saved ? 'Remove' : 'Save'} ${title}`} aria-pressed={saved} onClick={() => onSave(item.id)}><DashboardIcon name="bookmark" size={16} className={saved ? styles.savedIcon : ''} /></button></div>
+      <div className={styles.discoverLinkActions}><OpenLinkButton className={styles.discoverPrimaryLink} contentId={item.id}>Open link <DashboardIcon name="arrow" size={14} /></OpenLinkButton><button type="button" aria-label={`${saved ? 'Remove' : 'Save'} ${title}`} aria-pressed={saved} onClick={() => onSave(item.id)}><DashboardIcon name="bookmark" size={16} className={saved ? styles.savedIcon : ''} /></button></div>
     </div>
   </article>;
 }

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { DashboardBrand, DashboardIcon, DashboardSidebar } from './DreamDashboard';
+import OpenLinkButton from './OpenLinkButton';
 import styles from './DreamDashboard.module.css';
 
 // Keep browser requests on the current origin. Next rewrites /api to the
@@ -58,7 +59,7 @@ function ContentPreview({ item, onClose }) {
     <section className={styles.mediaDialog} role="dialog" aria-modal="true" aria-labelledby="collection-preview-title" onClick={event => event.stopPropagation()}>
       <button className={styles.dialogClose} type="button" onClick={onClose} aria-label="Close collection preview"><DashboardIcon name="close" /></button>
       <div className={styles.mediaDialogVisual}>{item.imageUrl ? <img src={item.imageUrl} alt="" /> : <div className={styles.mediaFallback}><DashboardIcon name="image" size={35} /></div>}{item.isPremium && <span className={styles.mediaPremium}>Premium</span>}</div>
-      <div className={styles.mediaDialogCopy}><span>{item.isTrending ? 'TRENDING COLLECTION' : 'COLLECTION'}</span><h2 id="collection-preview-title">{item.title || 'Untitled collection'}</h2><p>{item.relativeAge || dateLabel(item.createdAt)} · {Number(item.images || 0)} photos · {Number(item.videos || 0)} videos</p><dl><div><small>Size</small><strong>{item.sizeDisplay || '—'}</strong></div><div><small>Content</small><strong>{count(mediaCount(item))} items</strong></div></dl><div className={styles.mediaDialogActions}>{item.megaUrl ? <a href={item.megaUrl} target="_blank" rel="noreferrer">Open link <DashboardIcon name="arrow" size={16} /></a> : <Link href="/upgrade">Access options <DashboardIcon name="crown" size={16} /></Link>}<button type="button" onClick={onClose}>Close preview</button></div></div>
+      <div className={styles.mediaDialogCopy}><span>{item.isTrending ? 'TRENDING COLLECTION' : 'COLLECTION'}</span><h2 id="collection-preview-title">{item.title || 'Untitled collection'}</h2><p>{item.relativeAge || dateLabel(item.createdAt)} · {Number(item.images || 0)} photos · {Number(item.videos || 0)} videos</p><dl><div><small>Size</small><strong>{item.sizeDisplay || '—'}</strong></div><div><small>Content</small><strong>{count(mediaCount(item))} items</strong></div></dl><div className={styles.mediaDialogActions}><OpenLinkButton className={styles.mediaPrimaryLink} contentId={item.contentId || item.id}>Open link <DashboardIcon name="arrow" size={16} /></OpenLinkButton><button type="button" onClick={onClose}>Close preview</button></div></div>
     </section>
   </div>;
 }
@@ -77,7 +78,7 @@ function CollectionCard({ item, saved, onSave, onPreview, eager = false }) {
       <h3 title={label}>{label}</h3>
       <p><span>{Number(item.images || 0)} photos</span><span>{Number(item.videos || 0)} videos</span>{item.sizeDisplay && <span>{item.sizeDisplay}</span>}</p>
       <small><DashboardIcon name="clock" size={13} />{item.relativeAge || dateLabel(item.createdAt)}</small>
-      <div className={styles.collectionActions}>{item.megaUrl ? <a href={item.megaUrl} target="_blank" rel="noreferrer">Open link <DashboardIcon name="arrow" size={14} /></a> : <button type="button" className={styles.lockedCollection} onClick={() => onPreview(item)}>{item.isPremium ? 'View access' : 'Preview'}</button>}<button type="button" className={styles.collectionSave} aria-label={`${saved ? 'Remove' : 'Save'} ${label}`} aria-pressed={saved} onClick={() => onSave(item.id || item.shortCode || label)}><DashboardIcon name="bookmark" size={16} className={saved ? styles.savedIcon : ''} /></button></div>
+      <div className={styles.collectionActions}><OpenLinkButton className={styles.collectionOpenLink} contentId={item.contentId || item.id}>Open link <DashboardIcon name="arrow" size={14} /></OpenLinkButton><button type="button" className={styles.collectionSave} aria-label={`${saved ? 'Remove' : 'Save'} ${label}`} aria-pressed={saved} onClick={() => onSave(item.id || item.shortCode || label)}><DashboardIcon name="bookmark" size={16} className={saved ? styles.savedIcon : ''} /></button></div>
     </div>
   </article>;
 }

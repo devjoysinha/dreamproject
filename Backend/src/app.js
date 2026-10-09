@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import { z } from 'zod';
@@ -6,7 +5,7 @@ import { config } from './config.js';
 import { pool } from './db.js';
 import { getCachedJson, setCachedJson } from './cache.js';
 import { authRouter } from './auth.js';
-import { createHumanSession, readCookie, verifyHumanSession } from './humanVerification.js';
+import { createHumanSession, createLinkAccessTicket, readCookie, verifyHumanSession, verifyLinkAccessTicket } from './humanVerification.js';
 
 const listQuery = z.object({
   query: z.string().trim().max(120).optional(),
@@ -32,6 +31,12 @@ const openLinksQuery = z.object({
   sort: z.enum(['newest', 'trending', 'name']).default('newest'),
   limit: z.coerce.number().int().min(1).max(60).default(24),
   offset: z.coerce.number().int().min(0).default(0),
+});
+const openLinkParams = z.object({
+  contentId: z.string().trim().min(1).max(128),
+});
+const linkAccessBody = z.object({
+  token: z.string().min(20).max(4096).optional(),
 });
 
 const cardFields = `
@@ -86,23 +91,36 @@ app.set('trust proxy', 'loopback');
 app.use(cors({ origin: config.FRONTEND_ORIGIN, methods: ['GET'] }));
 app.use(express.json({ limit: '100kb' }));
 
-function sameSecret(left, right) {
-  if (typeof left !== 'string' || typeof right !== 'string') return false;
-  const received = Buffer.from(left);
-  const expected = Buffer.from(right);
-  return received.length === expected.length && crypto.timingSafeEqual(received, expected);
-}
-
-function isInternalRenderRequest(req) {
-  return sameSecret(req.get('X-Dream-Internal-Request'), config.INTERNAL_API_TOKEN);
-}
-
-function requireHumanVerification(req, res, next) {
-  if (!config.HUMAN_VERIFICATION_ENABLED || isInternalRenderRequest(req)) return next();
+function hasHumanVerification(req) {
+  if (!config.HUMAN_VERIFICATION_ENABLED) return true;
   const session = readCookie(req.headers.cookie, config.HUMAN_VERIFICATION_COOKIE_NAME);
-  if (session && verifyHumanSession(session, config.HUMAN_VERIFICATION_SECRET)) return next();
-  res.set('Cache-Control', 'private, no-store');
-  res.status(403).json({ error: 'Browser verification required.' });
+  return Boolean(session && verifyHumanSession(session, config.HUMAN_VERIFICATION_SECRET));
+}
+
+function setHumanVerificationCookie(res) {
+  const session = createHumanSession(config.HUMAN_VERIFICATION_SECRET, { ttlSeconds: config.HUMAN_VERIFICATION_TTL_SECONDS });
+  res.cookie(config.HUMAN_VERIFICATION_COOKIE_NAME, session, {
+    httpOnly: true,
+    secure: new URL(config.FRONTEND_ORIGIN).protocol === 'https:',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: config.HUMAN_VERIFICATION_TTL_SECONDS * 1000,
+  });
+}
+
+function linkTicketSecret() {
+  // This makes ticket signing available in development before Turnstile is
+  // enabled, while production verification uses its dedicated secret.
+  return config.HUMAN_VERIFICATION_SECRET || config.SESSION_SECRET;
+}
+
+function isSafeExternalUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
 }
 
 async function verifyTurnstile(token, remoteIp) {
@@ -132,37 +150,64 @@ app.get('/health', async (_req, res, next) => {
 
 app.use('/api/auth', authRouter);
 
-app.post('/api/verification', async (req, res, next) => {
+app.post('/api/open-links/:contentId/access', async (req, res, next) => {
   res.set('Cache-Control', 'private, no-store');
-  if (!config.HUMAN_VERIFICATION_ENABLED) return res.status(404).json({ error: 'Not found' });
-  const parsed = z.object({ token: z.string().min(20).max(4096) }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: 'Verification token is required.' });
+  const params = openLinkParams.safeParse(req.params);
+  if (!params.success) return res.status(400).json({ error: 'Invalid content identifier.' });
+  const body = linkAccessBody.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: 'Invalid verification request.' });
+
   try {
-    const outcome = await verifyTurnstile(parsed.data.token, req.ip);
-    if (!outcome.success) return res.status(403).json({ error: 'Verification was not accepted. Please try again.' });
-    const session = createHumanSession(config.HUMAN_VERIFICATION_SECRET, { ttlSeconds: config.HUMAN_VERIFICATION_TTL_SECONDS });
-    res.cookie(config.HUMAN_VERIFICATION_COOKIE_NAME, session, {
-      httpOnly: true,
-      secure: new URL(config.FRONTEND_ORIGIN).protocol === 'https:',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: config.HUMAN_VERIFICATION_TTL_SECONDS * 1000,
-    });
-    res.status(204).end();
+    if (!hasHumanVerification(req)) {
+      if (!body.data.token) return res.status(403).json({ error: 'Browser verification required.', verificationRequired: true });
+      const outcome = await verifyTurnstile(body.data.token, req.ip);
+      if (!outcome.success) return res.status(403).json({ error: 'Verification was not accepted. Please try again.', verificationRequired: true });
+      setHumanVerificationCookie(res);
+    }
+
+    const destination = await pool.query(
+      "SELECT mega_url FROM media_items WHERE content_id = $1 AND status = 'resolved' AND mega_url IS NOT NULL LIMIT 1",
+      [params.data.contentId],
+    );
+    const destinationUrl = destination.rows[0]?.mega_url;
+    if (!isSafeExternalUrl(destinationUrl)) return res.status(404).json({ error: 'This link is no longer available.' });
+
+    const secret = linkTicketSecret();
+    if (!secret) return res.status(503).json({ error: 'Secure link service is unavailable.' });
+    const ticket = createLinkAccessTicket(secret, params.data.contentId, { ttlSeconds: config.LINK_ACCESS_TTL_SECONDS });
+    const contentId = encodeURIComponent(params.data.contentId);
+    res.json({ redirectUrl: `/api/open-links/${contentId}/redirect?ticket=${encodeURIComponent(ticket)}` });
   } catch (error) {
     next(error);
   }
 });
 
-app.use('/api/open-links', requireHumanVerification);
-app.use('/api/models', requireHumanVerification);
-app.use('/api/tags', requireHumanVerification);
-app.use('/api/model-filters', requireHumanVerification);
+app.get('/api/open-links/:contentId/redirect', async (req, res, next) => {
+  res.set('Cache-Control', 'private, no-store');
+  const params = openLinkParams.safeParse(req.params);
+  const ticket = typeof req.query.ticket === 'string' ? req.query.ticket : '';
+  const secret = linkTicketSecret();
+  if (!params.success || !secret || !verifyLinkAccessTicket(ticket, secret, params.data.contentId)) {
+    return res.status(403).json({ error: 'This secure link has expired. Please try again.' });
+  }
+
+  try {
+    const destination = await pool.query(
+      "SELECT mega_url FROM media_items WHERE content_id = $1 AND status = 'resolved' AND mega_url IS NOT NULL LIMIT 1",
+      [params.data.contentId],
+    );
+    const destinationUrl = destination.rows[0]?.mega_url;
+    if (!isSafeExternalUrl(destinationUrl)) return res.status(404).json({ error: 'This link is no longer available.' });
+    res.redirect(302, destinationUrl);
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.get('/api/open-links', async (req, res, next) => {
   const query = parseOrRespond(openLinksQuery, req.query, res);
   if (!query) return;
-  const cacheKey = requestCacheKey('open-links:v3', query);
+  const cacheKey = requestCacheKey('open-links:v4', query);
   const cached = await getCachedJson(cacheKey);
   if (cached) return res.json(cached);
   const filters = ["item.mega_url IS NOT NULL", "item.status = 'resolved'"];
@@ -201,7 +246,7 @@ app.get('/api/open-links', async (req, res, next) => {
       ORDER BY relation.position ASC, model.name ASC
       LIMIT 1
     ) m ON TRUE`;
-  const sql = `SELECT item.content_id AS id, item.short_code AS "shortCode", item.title, item.image_url AS "imageUrl", item.image_count AS images, item.video_count AS videos, item.size_bytes AS "sizeBytes", item.size_display AS "sizeDisplay", item.created_at AS "createdAt", item.relative_age AS "relativeAge", item.is_trending AS "isTrending", item.is_premium AS "isPremium", item.mega_url AS "megaUrl", item.status, m.slug AS "modelSlug", m.name AS "modelName" ${from} ${where} ORDER BY ${openLinksOrdering(query.sort)} LIMIT $${values.length - 1} OFFSET $${values.length}`;
+  const sql = `SELECT item.content_id AS id, item.short_code AS "shortCode", item.title, item.image_url AS "imageUrl", item.image_count AS images, item.video_count AS videos, item.size_bytes AS "sizeBytes", item.size_display AS "sizeDisplay", item.created_at AS "createdAt", item.relative_age AS "relativeAge", item.is_trending AS "isTrending", item.is_premium AS "isPremium", item.status, m.slug AS "modelSlug", m.name AS "modelName" ${from} ${where} ORDER BY ${openLinksOrdering(query.sort)} LIMIT $${values.length - 1} OFFSET $${values.length}`;
   const totalSql = `SELECT COUNT(*)::int AS total ${from} ${where}`;
   try {
     const [items, total] = await Promise.all([
@@ -330,7 +375,7 @@ app.get('/api/model-filters', async (_req, res, next) => {
 app.get('/api/models/:slug', async (req, res, next) => {
   const page = parseOrRespond(paginationQuery, req.query, res);
   if (!page) return;
-  const cacheKey = requestCacheKey(`model:${req.params.slug}`, page);
+  const cacheKey = requestCacheKey(`model:v2:${req.params.slug}`, page);
   const cached = await getCachedJson(cacheKey);
   if (cached) return res.json(cached);
   try {
@@ -344,7 +389,7 @@ app.get('/api/models/:slug', async (req, res, next) => {
           item.created_at AS "createdAt", item.relative_age AS "relativeAge", item.is_trending AS "isTrending",
           item.is_premium AS "isPremium", item.media_type AS "mediaType", item.image_url AS "imageUrl",
           item.size_bytes AS "sizeBytes", item.size_display AS "sizeDisplay", item.image_count AS images,
-          item.video_count AS videos, item.mega_url AS "megaUrl", item.status
+          item.video_count AS videos, item.status
         FROM model_open_links relation
         JOIN media_items item ON item.content_id = relation.content_id
         WHERE relation.model_id = $1 AND item.mega_url IS NOT NULL AND item.status = 'resolved'

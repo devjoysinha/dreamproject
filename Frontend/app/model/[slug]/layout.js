@@ -1,5 +1,4 @@
 import { absoluteUrl, siteName, siteUrl } from '../../lib/seo';
-import { internalApiHeaders } from '../../lib/backend';
 
 const backendOrigin = process.env.BACKEND_ORIGIN || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -41,7 +40,7 @@ async function getModel(rawSlug) {
   try {
     const endpoint = new URL(`/api/models/${encodeURIComponent(profileSlug(rawSlug))}`, backendOrigin);
     endpoint.searchParams.set('limit', '1');
-    const response = await fetch(endpoint, { headers: internalApiHeaders(), next: { revalidate: 3600 } });
+    const response = await fetch(endpoint, { next: { revalidate: 3600 } });
     return response.ok ? response.json() : null;
   } catch {
     return null;

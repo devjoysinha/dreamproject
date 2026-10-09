@@ -3,7 +3,7 @@
 This project now has two independent checks:
 
 1. **Cloudflare at the edge** challenges likely bots before their request reaches the server. This is where IP reputation, datacenter/proxy/VPN signals, browser signals, and request behaviour are evaluated.
-2. **Turnstile in the app** makes the visitor complete a Cloudflare browser check before Next.js renders a catalogue page or the API returns catalogue data. The backend redeems every token with Siteverify and sets a signed, HTTP-only session cookie for 12 hours.
+2. **Turnstile at Open Link** keeps the catalogue browsable but does not expose destination URLs in it. When someone presses **Open Link**, the browser asks a protected per-item endpoint for a short-lived local redirect. If needed, it first completes Turnstile; the backend redeems the token with Siteverify and sets a signed, HTTP-only session cookie for 12 hours.
 
 Neither layer can prove that every visitor is human or that every VPN is malicious. The goal is to make automated collection expensive while avoiding blanket VPN blocks that would reject legitimate privacy-conscious visitors.
 
@@ -18,31 +18,26 @@ Do not try to block every VPN or proxy ASN. That creates substantial false posit
 
 ## 2. Configure the shared application secrets
 
-Generate two independent values:
+Generate a signing secret:
 
 ```sh
 openssl rand -base64 48
-openssl rand -base64 48
 ```
 
-Set the same values in both service environment files:
+Set the server-side values in `Backend/.env` and the public widget key in `Frontend/.env`:
 
 ```dotenv
 # Backend/.env
 HUMAN_VERIFICATION_ENABLED=true
-HUMAN_VERIFICATION_SECRET=<first generated value>
-INTERNAL_API_TOKEN=<second generated value>
+HUMAN_VERIFICATION_SECRET=<generated value>
 TURNSTILE_SECRET_KEY=<Turnstile secret key>
 TURNSTILE_EXPECTED_HOSTNAMES=leakporns.com,www.leakporns.com
 
 # Frontend/.env
-HUMAN_VERIFICATION_ENABLED=true
-HUMAN_VERIFICATION_SECRET=<first generated value>
-INTERNAL_API_TOKEN=<second generated value>
 NEXT_PUBLIC_TURNSTILE_SITE_KEY=<Turnstile site key>
 ```
 
-`HUMAN_VERIFICATION_SECRET`, `INTERNAL_API_TOKEN`, and the Turnstile secret key must never use `NEXT_PUBLIC_` and must never be committed. Restart both services after changing these values.
+`HUMAN_VERIFICATION_SECRET` and the Turnstile secret key must never use `NEXT_PUBLIC_` and must never be committed. Restart both services after changing these values.
 
 ## 3. Protect the origin
 
@@ -57,8 +52,8 @@ At the cloud-provider firewall/security-group layer, allow TCP 80/443 from Cloud
 
 ## Acceptance checks
 
-- A new visitor is redirected to `/verify`, completes Turnstile, and returns to the original page.
-- `curl https://leakporns.com/api/open-links` returns `403` without the signed HTTP-only cookie.
-- The same endpoint works in a browser after verification.
+- `curl https://leakporns.com/api/open-links` returns card metadata and item IDs, but never `megaUrl` or another destination field.
+- `POST /api/open-links/<content-id>/access` returns `403` with `verificationRequired: true` until Turnstile is completed.
+- After completing Turnstile, the access endpoint returns only a same-origin `/api/open-links/<content-id>/redirect?ticket=...` URL. The signed ticket expires in two minutes and the redirect endpoint releases the external destination.
 - Nginx access logs show the real visitor IP rather than a Cloudflare IP.
 - A direct request to the origin IP is blocked by the hosting firewall.
