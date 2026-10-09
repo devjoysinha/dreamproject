@@ -11,9 +11,15 @@ export function backendUrl(path, searchParams) {
   return url.toString();
 }
 
+export function internalApiHeaders() {
+  return process.env.INTERNAL_API_TOKEN
+    ? { 'X-Dream-Internal-Request': process.env.INTERNAL_API_TOKEN }
+    : undefined;
+}
+
 export async function fetchBackendJson(path, { searchParams, revalidate = 30 } = {}) {
   try {
-    const response = await fetch(backendUrl(path, searchParams), { next: { revalidate }, signal: AbortSignal.timeout(5000) });
+    const response = await fetch(backendUrl(path, searchParams), { headers: internalApiHeaders(), next: { revalidate }, signal: AbortSignal.timeout(5000) });
     if (!response.ok) return null;
     return await response.json();
   } catch {

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import cors from 'cors';
 import express from 'express';
 import { z } from 'zod';
@@ -5,6 +6,7 @@ import { config } from './config.js';
 import { pool } from './db.js';
 import { getCachedJson, setCachedJson } from './cache.js';
 import { authRouter } from './auth.js';
+import { createHumanSession, readCookie, verifyHumanSession } from './humanVerification.js';
 
 const listQuery = z.object({
   query: z.string().trim().max(120).optional(),
@@ -78,8 +80,46 @@ function requestCacheKey(prefix, query) {
 
 export const app = express();
 app.disable('x-powered-by');
+// The backend listens only on the loopback interface in production. Trust the
+// local reverse proxy for the original address supplied by Cloudflare.
+app.set('trust proxy', 'loopback');
 app.use(cors({ origin: config.FRONTEND_ORIGIN, methods: ['GET'] }));
 app.use(express.json({ limit: '100kb' }));
+
+function sameSecret(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string') return false;
+  const received = Buffer.from(left);
+  const expected = Buffer.from(right);
+  return received.length === expected.length && crypto.timingSafeEqual(received, expected);
+}
+
+function isInternalRenderRequest(req) {
+  return sameSecret(req.get('X-Dream-Internal-Request'), config.INTERNAL_API_TOKEN);
+}
+
+function requireHumanVerification(req, res, next) {
+  if (!config.HUMAN_VERIFICATION_ENABLED || isInternalRenderRequest(req)) return next();
+  const session = readCookie(req.headers.cookie, config.HUMAN_VERIFICATION_COOKIE_NAME);
+  if (session && verifyHumanSession(session, config.HUMAN_VERIFICATION_SECRET)) return next();
+  res.set('Cache-Control', 'private, no-store');
+  res.status(403).json({ error: 'Browser verification required.' });
+}
+
+async function verifyTurnstile(token, remoteIp) {
+  const form = new URLSearchParams({ secret: config.TURNSTILE_SECRET_KEY, response: token });
+  if (remoteIp) form.set('remoteip', remoteIp);
+  const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form,
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok) return { success: false };
+  const result = await response.json();
+  if (!result?.success) return { success: false };
+  if (config.TURNSTILE_EXPECTED_HOSTNAMES.length && !config.TURNSTILE_EXPECTED_HOSTNAMES.includes(result.hostname?.toLowerCase())) return { success: false };
+  return { success: true };
+}
 
 app.get('/health', async (_req, res, next) => {
   try {
@@ -91,6 +131,33 @@ app.get('/health', async (_req, res, next) => {
 });
 
 app.use('/api/auth', authRouter);
+
+app.post('/api/verification', async (req, res, next) => {
+  res.set('Cache-Control', 'private, no-store');
+  if (!config.HUMAN_VERIFICATION_ENABLED) return res.status(404).json({ error: 'Not found' });
+  const parsed = z.object({ token: z.string().min(20).max(4096) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Verification token is required.' });
+  try {
+    const outcome = await verifyTurnstile(parsed.data.token, req.ip);
+    if (!outcome.success) return res.status(403).json({ error: 'Verification was not accepted. Please try again.' });
+    const session = createHumanSession(config.HUMAN_VERIFICATION_SECRET, { ttlSeconds: config.HUMAN_VERIFICATION_TTL_SECONDS });
+    res.cookie(config.HUMAN_VERIFICATION_COOKIE_NAME, session, {
+      httpOnly: true,
+      secure: new URL(config.FRONTEND_ORIGIN).protocol === 'https:',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: config.HUMAN_VERIFICATION_TTL_SECONDS * 1000,
+    });
+    res.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.use('/api/open-links', requireHumanVerification);
+app.use('/api/models', requireHumanVerification);
+app.use('/api/tags', requireHumanVerification);
+app.use('/api/model-filters', requireHumanVerification);
 
 app.get('/api/open-links', async (req, res, next) => {
   const query = parseOrRespond(openLinksQuery, req.query, res);

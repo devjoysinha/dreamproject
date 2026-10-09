@@ -46,9 +46,18 @@ const schema = z.object({
   GOOGLE_REDIRECT_URI: z.string().url().optional(),
   SESSION_SECRET: z.string().min(32).optional(),
   SESSION_COOKIE_NAME: z.string().regex(/^[a-zA-Z0-9_-]+$/).default('lp_session'),
+  HUMAN_VERIFICATION_ENABLED: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
+  HUMAN_VERIFICATION_SECRET: z.string().min(32).optional(),
+  HUMAN_VERIFICATION_COOKIE_NAME: z.string().regex(/^[a-zA-Z0-9_-]+$/).default('lp_human'),
+  HUMAN_VERIFICATION_TTL_SECONDS: z.coerce.number().int().min(300).max(60 * 60 * 24).default(60 * 60 * 12),
+  INTERNAL_API_TOKEN: z.string().min(32).optional(),
+  TURNSTILE_SECRET_KEY: z.string().min(1).optional(),
+  TURNSTILE_EXPECTED_HOSTNAMES: z.string().optional().transform(value => value
+    ? value.split(',').map(hostname => hostname.trim().toLowerCase()).filter(Boolean)
+    : []),
 });
 
-export const config = schema.parse({
+const parsedConfig = schema.parse({
   ...process.env,
   FRONTEND_ORIGIN: frontendOrigin,
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || localGoogleCredentials?.client_id,
@@ -56,3 +65,11 @@ export const config = schema.parse({
   GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI || (localGoogleCredentials ? `${frontendOrigin}/api/auth/google/callback` : undefined),
   SESSION_SECRET: process.env.SESSION_SECRET || localSessionSecret,
 });
+
+if (parsedConfig.HUMAN_VERIFICATION_ENABLED) {
+  const required = ['HUMAN_VERIFICATION_SECRET', 'INTERNAL_API_TOKEN', 'TURNSTILE_SECRET_KEY'];
+  const missing = required.filter(key => !parsedConfig[key]);
+  if (missing.length) throw new Error(`Human verification is enabled but ${missing.join(', ')} is missing.`);
+}
+
+export const config = parsedConfig;
