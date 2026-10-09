@@ -1,4 +1,5 @@
 import cors from 'cors';
+import crypto from 'node:crypto';
 import express from 'express';
 import { z } from 'zod';
 import { config } from './config.js';
@@ -6,6 +7,7 @@ import { pool } from './db.js';
 import { getCachedJson, setCachedJson } from './cache.js';
 import { authRouter } from './auth.js';
 import { createHumanSession, createLinkAccessTicket, readCookie, verifyHumanSession, verifyLinkAccessTicket } from './humanVerification.js';
+import { addCredits, COST_PER_OPEN, deductCredits, getOrCreateVisitor, INITIAL_CREDITS } from './credits.js';
 
 const listQuery = z.object({
   query: z.string().trim().max(120).optional(),
@@ -37,6 +39,7 @@ const openLinkParams = z.object({
 });
 const linkAccessBody = z.object({
   token: z.string().min(20).max(4096).optional(),
+  fingerprint: z.string().min(16).max(128).optional(),
 });
 
 const cardFields = `
@@ -89,7 +92,10 @@ app.disable('x-powered-by');
 // local reverse proxy for the original address supplied by Cloudflare.
 app.set('trust proxy', 'loopback');
 app.use(cors({ origin: config.FRONTEND_ORIGIN, methods: ['GET'] }));
-app.use(express.json({ limit: '100kb' }));
+app.use(express.json({
+  limit: '100kb',
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+}));
 
 function hasHumanVerification(req) {
   if (!config.HUMAN_VERIFICATION_ENABLED) return true;
@@ -155,6 +161,20 @@ app.post('/api/open-links/:contentId/access', async (req, res, next) => {
   if (!body.success) return res.status(400).json({ error: 'Invalid verification request.' });
 
   try {
+    const fp = body.data.fingerprint;
+    if (fp) {
+      const visitor = await getOrCreateVisitor(fp);
+      if (visitor.credits < COST_PER_OPEN) {
+        return res.status(402).json({
+          error: 'You have used all your free credits. Purchase more to continue.',
+          creditsRequired: true,
+          credits: visitor.credits,
+          opensUsed: visitor.opens_used,
+          paymentUrl: 'https://pay.leakporns.com/',
+        });
+      }
+    }
+
     if (!hasHumanVerification(req)) {
       if (!body.data.token) return res.status(403).json({ error: 'Browser verification required.', verificationRequired: true });
       const outcome = await verifyCap(body.data.token);
@@ -168,6 +188,18 @@ app.post('/api/open-links/:contentId/access', async (req, res, next) => {
     );
     const destinationUrl = destination.rows[0]?.mega_url;
     if (!isSafeExternalUrl(destinationUrl)) return res.status(404).json({ error: 'This link is no longer available.' });
+
+    if (fp) {
+      const deducted = await deductCredits(fp);
+      if (!deducted) {
+        return res.status(402).json({
+          error: 'You have used all your free credits. Purchase more to continue.',
+          creditsRequired: true,
+          credits: 0,
+          paymentUrl: 'https://pay.leakporns.com/',
+        });
+      }
+    }
 
     const secret = linkTicketSecret();
     if (!secret) return res.status(503).json({ error: 'Secure link service is unavailable.' });
@@ -196,6 +228,68 @@ app.get('/api/open-links/:contentId/redirect', async (req, res, next) => {
     const destinationUrl = destination.rows[0]?.mega_url;
     if (!isSafeExternalUrl(destinationUrl)) return res.status(404).json({ error: 'This link is no longer available.' });
     res.redirect(302, destinationUrl);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/credits', async (req, res, next) => {
+  const fp = typeof req.query.fingerprint === 'string' ? req.query.fingerprint.trim() : '';
+  if (!fp || fp.length < 16 || fp.length > 128) return res.status(400).json({ error: 'Invalid fingerprint.' });
+  try {
+    const visitor = await getOrCreateVisitor(fp);
+    res.json({ credits: visitor.credits, opensUsed: visitor.opens_used, costPerOpen: COST_PER_OPEN, paymentUrl: 'https://pay.leakporns.com/' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/payments/create', async (req, res, next) => {
+  if (!config.PAYRAM_API_URL || !config.PAYRAM_API_KEY) return res.status(503).json({ error: 'Payments are not configured.' });
+  const body = z.object({ fingerprint: z.string().min(16).max(128) }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: 'Invalid request.' });
+  try {
+    const payRes = await fetch(`${config.PAYRAM_API_URL}/api/v1/payment`, {
+      method: 'POST',
+      headers: { 'API-Key': config.PAYRAM_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerID: body.data.fingerprint,
+        customerEmail: `${body.data.fingerprint}@visitor.leakporns.com`,
+        amountInUSD: config.PAYRAM_PRICE_USD,
+        invoiceID: `lp-credits-${body.data.fingerprint}-${Date.now()}`,
+      }),
+    });
+    const payData = await payRes.json();
+    if (!payRes.ok) return res.status(502).json({ error: 'Payment service error.' });
+    res.json({ paymentUrl: payData.url, referenceId: payData.reference_id });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/payments/webhook', async (req, res, next) => {
+  if (!config.PAYRAM_API_KEY) return res.status(503).end();
+  const signature = req.headers['x-payram-signature'];
+  if (signature) {
+    const raw = req.rawBody;
+    if (!raw) return res.status(400).json({ error: 'Missing body.' });
+    const expected = 'sha256=' + crypto.createHmac('sha256', config.PAYRAM_API_KEY).update(raw).digest('hex');
+    if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+      return res.status(401).json({ error: 'Invalid signature.' });
+    }
+  } else {
+    const apiKey = req.headers['api-key'];
+    if (apiKey !== config.PAYRAM_API_KEY) return res.status(401).json({ error: 'Unauthorized.' });
+  }
+  try {
+    const event = req.body;
+    if (event.status === 'FILLED' || event.status === 'OVER_FILLED') {
+      const fp = event.customer_id;
+      if (fp && fp.length >= 16) {
+        await addCredits(fp, COST_PER_OPEN);
+      }
+    }
+    res.status(200).json({ ok: true });
   } catch (error) {
     next(error);
   }

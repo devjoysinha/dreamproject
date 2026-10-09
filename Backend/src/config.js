@@ -53,6 +53,9 @@ const schema = z.object({
   LINK_ACCESS_TTL_SECONDS: z.coerce.number().int().min(30).max(600).default(120),
   CAP_API_ENDPOINT: z.string().url().optional(),
   CAP_SECRET_KEY: z.string().min(1).optional(),
+  PAYRAM_API_URL: z.string().url().optional(),
+  PAYRAM_API_KEY: z.string().min(1).optional(),
+  PAYRAM_PRICE_USD: z.coerce.number().positive().default(0.22),
 });
 
 const parsedConfig = schema.parse({

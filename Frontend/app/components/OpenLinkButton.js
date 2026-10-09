@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { getFingerprint } from '../lib/fingerprint';
 import styles from './OpenLinkButton.module.css';
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
@@ -62,14 +63,20 @@ export default function OpenLinkButton({ contentId, card, className = '', childr
   const busy = phase === 'preparing' || phase === 'validating' || phase === 'redirecting';
 
   const requestAccess = async token => {
+    const fp = getFingerprint();
+    const payload = { fingerprint: fp };
+    if (token) payload.token = token;
     const response = await fetch(`${apiBase}/api/open-links/${encodeURIComponent(contentId)}/access`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify(token ? { token } : {}),
+      body: JSON.stringify(payload),
     });
     const data = await response.json().catch(() => ({}));
     if (response.ok && isLinkRedirect(data.redirectUrl)) return { redirectUrl: data.redirectUrl };
+    if (response.status === 402 && data.creditsRequired) {
+      return { creditsRequired: true, credits: data.credits ?? 0, paymentUrl: data.paymentUrl };
+    }
     return {
       error: data.error || 'We could not prepare this link. Please try again.',
       verificationRequired: response.status === 403 && data.verificationRequired === true,
@@ -98,6 +105,12 @@ export default function OpenLinkButton({ contentId, card, className = '', childr
         setDialogOpen(true);
         return openRedirect(result.redirectUrl);
       }
+      if (result.creditsRequired) {
+        setDialogOpen(true);
+        setPhase('payment');
+        setErrorMsg(result.paymentUrl || 'https://pay.leakporns.com/');
+        return;
+      }
       if (result.verificationRequired) {
         setDialogOpen(true);
         setPhase('challenge');
@@ -120,6 +133,11 @@ export default function OpenLinkButton({ contentId, card, className = '', childr
     try {
       const result = await requestAccess(token);
       if (result.redirectUrl) return openRedirect(result.redirectUrl);
+      if (result.creditsRequired) {
+        setPhase('payment');
+        setErrorMsg(result.paymentUrl || 'https://pay.leakporns.com/');
+        return;
+      }
       setPhase('error');
       setErrorMsg(result.error);
     } catch {
@@ -200,6 +218,36 @@ export default function OpenLinkButton({ contentId, card, className = '', childr
           <div className={styles.validating} role="status" aria-live="polite">
             <Spinner />
             <span>Preparing</span>
+          </div>
+        )}
+
+        {phase === 'payment' && (
+          <div className={styles.paymentBlock}>
+            <p className={styles.paymentTitle}>Credits Exhausted</p>
+            <p className={styles.paymentText}>You have used all 3 free link opens. Pay ₹19 in BTC to unlock more access.</p>
+            <button className={styles.payButton} type="button" onClick={async () => {
+              try {
+                setPhase('preparing');
+                const fp = getFingerprint();
+                const r = await fetch(`${apiBase}/api/payments/create`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ fingerprint: fp }),
+                });
+                const data = await r.json();
+                if (r.ok && data.paymentUrl) {
+                  window.open(data.paymentUrl, '_blank', 'noopener');
+                  setPhase('payment');
+                } else {
+                  window.open('https://pay.leakporns.com/', '_blank', 'noopener');
+                  setPhase('payment');
+                }
+              } catch {
+                window.open('https://pay.leakporns.com/', '_blank', 'noopener');
+                setPhase('payment');
+              }
+            }}>Pay ₹19 to Continue</button>
+            <button className={styles.closePayment} type="button" onClick={closeDialog}>Close</button>
           </div>
         )}
 
