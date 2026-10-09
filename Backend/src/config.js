@@ -53,8 +53,8 @@ const schema = z.object({
   LINK_ACCESS_TTL_SECONDS: z.coerce.number().int().min(30).max(600).default(120),
   CAP_API_ENDPOINT: z.string().url().optional(),
   CAP_SECRET_KEY: z.string().min(1).optional(),
-  NOWPAYMENTS_API_KEY: z.string().min(1).optional(),
-  NOWPAYMENTS_IPN_SECRET: z.string().min(1).optional(),
+  NOWPAYMENTS_API_KEY: z.string().optional().transform(v => v || undefined),
+  NOWPAYMENTS_IPN_SECRET: z.string().optional().transform(v => v || undefined),
   NOWPAYMENTS_PRICE_USD: z.coerce.number().positive().default(0.22),
 });
 
