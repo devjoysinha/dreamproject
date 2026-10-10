@@ -403,17 +403,27 @@ def camoufox_proxy(proxy_url: str):
             loop.close()
 
 
-def prepare_origin_page(page: Any, timeout: int) -> None:
+def prepare_origin_page(page: Any, timeout: int, retries: int = 3) -> None:
     # `commit` waits for the public document response and its cookies without
     # making a large client-rendered application a prerequisite for resolving
     # links.  The direct-link page shares this real source origin.
-    response = page.goto(ORIGIN_URL, wait_until="commit", timeout=min(timeout, 30) * 1000)
-    if response is not None and response.status >= 400:
-        raise RuntimeError(f"Origin bootstrap returned HTTP {response.status}.")
-    # Do not clear local/session storage here.  The homepage may establish
-    # state used by the direct-link page; only the resolver-owned encryption
-    # key is created on demand below when absent.
-    page.wait_for_timeout(250)
+    last_error: Optional[BaseException] = None
+    for attempt in range(retries):
+        try:
+            response = page.goto(ORIGIN_URL, wait_until="commit", timeout=min(timeout, 30) * 1000)
+            if response is not None and response.status >= 400:
+                raise RuntimeError(f"Origin bootstrap returned HTTP {response.status}.")
+            # Do not clear local/session storage here.  The homepage may establish
+            # state used by the direct-link page; only the resolver-owned encryption
+            # key is created on demand below when absent.
+            page.wait_for_timeout(250)
+            return
+        except (PlaywrightError, PlaywrightTimeoutError) as error:
+            last_error = error
+            if attempt + 1 < retries:
+                LOGGER.warning("Origin page attempt %d/%d failed: %s", attempt + 1, retries, redact_error(error))
+                page.wait_for_timeout(3000)
+    raise last_error  # type: ignore[misc]
 
 
 def feed_records(context: Any, count: int, timeout: int) -> List[Mapping[str, Any]]:
@@ -977,78 +987,98 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
     # five-minute scheduler slot until systemd terminates it.
     with psycopg.connect(config.database_url, connect_timeout=12) as connection:
         matcher = AliasMatcher(fetch_model_rows(connection))
-        LOGGER.info("Starting proxy-backed browser session.")
-        with camoufox_proxy(config.proxy_url) as browser_proxy, Camoufox(
-            headless=True,
-            proxy=browser_proxy,
-            geoip=True,
-            persistent_context=True,
-            user_data_dir=str(ROOT / ".camoufox-root-profile"),
-            block_images=False,
-            enable_cache=False,
-            firefox_user_prefs=LOW_BANDWIDTH_PREFS,
-            i_know_what_im_doing=True,
-        ) as context:
-            LOGGER.info("Browser session ready; loading source origin.")
-            page = context.pages[0] if context.pages else context.new_page()
-            for stale in list(context.pages)[1:]:
-                stale.close()
-            prepare_origin_page(page, config.request_timeout)
-            LOGGER.info("Fetching the latest root-feed records through the proxy.")
-            records = [normalise_record(item) for item in feed_records(context, config.root_count, config.request_timeout)]
-            records = [item for item in records if item is not None]
-            stats["feed"] = len(records)
-            LOGGER.info("Received %s valid root-feed records.", stats["feed"])
-            known = known_content_ids(connection, [item["content_id"] for item in records])
-            stats["new"] = sum(1 for item in records if item["content_id"] not in known)
-            associations = {item["content_id"]: matcher.match(item["title"]) for item in records}
-            stats["associated_records"] = sum(1 for linked in associations.values() if linked)
-            stats["unmatched"] = len(records) - stats["associated_records"]
+        all_resolved: Dict[str, str] = {}
+        all_attempted: List[str] = []
+        root_window_ids: List[str] = []
+        root_image_prefix = ""
+        pending_ids: List[str] = []
+        feed_complete = False
+        sessions_used = 0
 
-            if not dry_run:
-                LOGGER.info("Copying preview images to S3 and upserting metadata.")
-                asset_store = AssetStore(
-                    config,
-                    lambda url: context.request.get(url, timeout=config.request_timeout * 1000),
+        max_setup_retries = min(3, config.max_proxy_sessions)
+        for setup_attempt in range(max_setup_retries):
+            try:
+                LOGGER.info("Starting proxy-backed browser session%s.", f" (retry {setup_attempt})" if setup_attempt else "")
+                with camoufox_proxy(config.proxy_url) as browser_proxy, Camoufox(
+                    headless=True,
+                    proxy=browser_proxy,
+                    geoip=True,
+                    persistent_context=True,
+                    user_data_dir=str(ROOT / ".camoufox-root-profile"),
+                    block_images=False,
+                    enable_cache=False,
+                    firefox_user_prefs=LOW_BANDWIDTH_PREFS,
+                    i_know_what_im_doing=True,
+                ) as context:
+                    sessions_used += 1
+                    page = context.pages[0] if context.pages else context.new_page()
+                    for stale in list(context.pages)[1:]:
+                        stale.close()
+                    prepare_origin_page(page, config.request_timeout)
+
+                    if not feed_complete:
+                        LOGGER.info("Fetching the latest root-feed records through the proxy.")
+                        records = [normalise_record(item) for item in feed_records(context, config.root_count, config.request_timeout)]
+                        records = [item for item in records if item is not None]
+                        stats["feed"] = len(records)
+                        LOGGER.info("Received %s valid root-feed records.", stats["feed"])
+                        known = known_content_ids(connection, [item["content_id"] for item in records])
+                        stats["new"] = sum(1 for item in records if item["content_id"] not in known)
+                        associations = {item["content_id"]: matcher.match(item["title"]) for item in records}
+                        stats["associated_records"] = sum(1 for linked in associations.values() if linked)
+                        stats["unmatched"] = len(records) - stats["associated_records"]
+
+                        if not dry_run:
+                            LOGGER.info("Copying preview images to S3 and upserting metadata.")
+                            asset_store = AssetStore(
+                                config,
+                                lambda url: context.request.get(url, timeout=config.request_timeout * 1000),
+                            )
+                            for item in records:
+                                if item["content_id"] not in known:
+                                    item["image_url"] = asset_store.local_url(item["source_image"])
+                            stats["image_failures"] = asset_store.upload_failures
+                            _items, stats["associations"] = upsert_feed(connection, records, associations)
+                            root_window_ids = [item["content_id"] for item in records]
+                            root_image_prefix = f"{config.asset_public_base_url}/{config.asset_prefix}"
+                            pending_ids = pending_content_ids(
+                                connection,
+                                config.max_resolves,
+                                root_window_ids,
+                                root_image_prefix,
+                                config.retry_cooldown_minutes,
+                            )
+                            LOGGER.info("Resolving %s pending direct links.", len(pending_ids))
+                        else:
+                            stats["associations"] = sum(len(value) for value in associations.values())
+                        feed_complete = True
+
+                    if not dry_run and pending_ids:
+                        resolved, attempted_ids = resolve_batch(
+                            context,
+                            page,
+                            pending_ids,
+                            config.resolve_batch_size,
+                            config.direct_navigation_timeout,
+                            config.direct_settle_timeout,
+                            config.direct_request_interval_seconds,
+                        )
+                        all_resolved.update(resolved)
+                        all_attempted.extend(attempted_ids)
+                        pending_ids = [cid for cid in pending_ids if cid not in all_resolved]
+                break
+            except (PlaywrightError, PlaywrightTimeoutError) as error:
+                if setup_attempt + 1 >= max_setup_retries:
+                    raise
+                LOGGER.warning(
+                    "Browser session failed: %s. Retrying with fresh proxy (%d/%d).",
+                    redact_error(error), setup_attempt + 2, max_setup_retries,
                 )
-                for item in records:
-                    if item["content_id"] not in known:
-                        item["image_url"] = asset_store.local_url(item["source_image"])
-                stats["image_failures"] = asset_store.upload_failures
-                _items, stats["associations"] = upsert_feed(connection, records, associations)
-                root_window_ids = [item["content_id"] for item in records]
-                root_image_prefix = f"{config.asset_public_base_url}/{config.asset_prefix}"
-                pending_ids = pending_content_ids(
-                    connection,
-                    config.max_resolves,
-                    root_window_ids,
-                    root_image_prefix,
-                    config.retry_cooldown_minutes,
-                )
-                LOGGER.info("Resolving %s pending direct links.", len(pending_ids))
-                all_resolved: Dict[str, str] = {}
-                all_attempted: List[str] = []
-                if pending_ids:
-                    resolved, attempted_ids = resolve_batch(
-                        context,
-                        page,
-                        pending_ids,
-                        config.resolve_batch_size,
-                        config.direct_navigation_timeout,
-                        config.direct_settle_timeout,
-                        config.direct_request_interval_seconds,
-                    )
-                    all_resolved.update(resolved)
-                    all_attempted.extend(attempted_ids)
-                    pending_ids = [cid for cid in pending_ids if cid not in all_resolved]
-            else:
-                stats["associations"] = sum(len(value) for value in associations.values())
 
         if not dry_run and pending_ids:
-            session_count = 1
-            while pending_ids and session_count < config.max_proxy_sessions:
-                session_count += 1
-                LOGGER.info("Rotating proxy session %d for %d remaining links.", session_count, len(pending_ids))
+            while pending_ids and sessions_used < config.max_proxy_sessions:
+                sessions_used += 1
+                LOGGER.info("Rotating proxy session %d for %d remaining links.", sessions_used, len(pending_ids))
                 with camoufox_proxy(config.proxy_url) as browser_proxy, Camoufox(
                     headless=True,
                     proxy=browser_proxy,
@@ -1076,7 +1106,7 @@ def run(config: Config, dry_run: bool = False) -> Dict[str, int]:
                     all_resolved.update(resolved)
                     all_attempted.extend(attempted_ids)
                     if not resolved:
-                        LOGGER.info("No links resolved in session %d; stopping rotation.", session_count)
+                        LOGGER.info("No links resolved in session %d; stopping rotation.", sessions_used)
                         break
                     pending_ids = [cid for cid in pending_ids if cid not in all_resolved]
 
