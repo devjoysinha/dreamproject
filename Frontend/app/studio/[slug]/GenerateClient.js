@@ -191,6 +191,12 @@ export default function GenerateClient({ slug }) {
           </div>
         </div>
 
+        <p style={{ marginTop: 20, marginBottom: 0 }}>
+          <span style={{ fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace', fontSize: 11, fontWeight: 700, letterSpacing: '.14em', color: '#8a7a6e' }}>
+            &mdash; PROMPT &middot; INPUT
+          </span>
+        </p>
+
         <div className={styles.generateBox}>
           <textarea
             className={styles.promptInput}

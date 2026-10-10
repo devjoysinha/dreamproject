@@ -29,6 +29,7 @@ function PresetCard({ preset }) {
       <div className={styles.presetMeta}>
         <span className={styles.presetCost}><DashboardIcon name="star" size={12} /> {preset.creditCost}</span>
         <span className={styles.presetCategory}>{preset.category.toUpperCase()}</span>
+        <span className={styles.presetArrow}>&rsaquo;</span>
       </div>
     </Link>
   );
@@ -72,35 +73,54 @@ export default function StudioClient() {
           </button>
         </header>
 
-        <div className={styles.heading}>
-          <p>AI STUDIO</p>
-          <h1>AI Image Generator</h1>
-          <span>Create stunning AI-generated images from text prompts. Pick a style, describe your vision, and watch it come to life.</span>
+        <div className={styles.heroSection}>
+          <div className={styles.heroLeft}>
+            <div className={styles.heading}>
+              <p>AI &middot; IMAGE GENERATOR</p>
+              <h1>Say hello to our new AI Image Generator</h1>
+              <span>Create stunning images from text prompts with our AI models. Pick a style, describe your vision, and watch it come to life — it&rsquo;s free.</span>
+            </div>
+            <Link href={presets[0] ? `/studio/${presets[0].slug}` : '#'} className={styles.ctaBtn}>
+              <DashboardIcon name="wand" size={16} />
+              Get Started for Free
+              <span>&rarr;</span>
+            </Link>
+          </div>
+          <div className={styles.heroRight}>
+            <div className={styles.featureCardV}>
+              <div className={styles.featureIconWrap}><DashboardIcon name="layers" size={18} /></div>
+              <div className={styles.featureInfo}>
+                <span className={styles.featureNum}>NO &middot; 01</span>
+                <strong>Image generation</strong>
+              </div>
+              <div className={styles.featureStat}>12s<span className={styles.featureStatSub}>PER RENDER</span></div>
+            </div>
+            <div className={styles.featureCardV}>
+              <div className={styles.featureIconWrap}><DashboardIcon name="star" size={18} /></div>
+              <div className={styles.featureInfo}>
+                <span className={styles.featureNum}>NO &middot; 02 <span className={styles.featureNewBadge}>NEW</span></span>
+                <strong>Multiple styles</strong>
+              </div>
+              <div className={styles.featureStat}>{presets.length}+<span className={styles.featureStatSub}>PRESETS</span></div>
+            </div>
+            <div className={styles.featureCardV}>
+              <div className={styles.featureIconWrap}><DashboardIcon name="wand" size={18} /></div>
+              <div className={styles.featureInfo}>
+                <span className={styles.featureNum}>NO &middot; 03</span>
+                <strong>No queue</strong>
+              </div>
+              <div className={styles.featureStat}>24/7<span className={styles.featureStatSub}>GPU POOL</span></div>
+            </div>
+          </div>
         </div>
 
-        <div className={styles.featureCards}>
-          <div className={styles.featureCard}>
-            <DashboardIcon name="layers" size={20} />
-            <div>
-              <strong>Image generation</strong>
-              <small>~12s per render</small>
-            </div>
-          </div>
-          <div className={styles.featureCard}>
-            <DashboardIcon name="star" size={20} />
-            <div>
-              <strong>Multiple styles</strong>
-              <small>{presets.length}+ presets</small>
-            </div>
-          </div>
-          <div className={styles.featureCard}>
-            <DashboardIcon name="wand" size={20} />
-            <div>
-              <strong>No queue</strong>
-              <small>24/7 GPU power</small>
-            </div>
-          </div>
-        </div>
+        <p className={styles.sectionSub} style={{ marginTop: 40 }}>
+          <span style={{ fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace', fontSize: 11, fontWeight: 700, letterSpacing: '.14em', color: '#8a7a6e' }}>
+            &mdash; MODELS &middot; CATALOG
+          </span>
+        </p>
+        <h2 className={styles.sectionTitle} style={{ marginTop: 8 }}>Our AI Models</h2>
+        <p className={styles.sectionSub}>Explore our complete collection of AI models</p>
 
         <div className={styles.chips}>
           {Object.entries(categoryLabels).map(([key, label]) => (
@@ -110,11 +130,8 @@ export default function StudioClient() {
           ))}
         </div>
 
-        <h2 className={styles.sectionTitle}>Our AI Models</h2>
-        <p className={styles.sectionSub}>Explore our collection of AI image generation styles</p>
-
         {loading ? (
-          <div className={styles.presetGrid}><div /><div /><div /><div /></div>
+          <div className={styles.skeletonGrid}><div /><div /><div /><div /></div>
         ) : presets.length === 0 ? (
           <section className={styles.empty}>
             <DashboardIcon name="wand" size={28} />
