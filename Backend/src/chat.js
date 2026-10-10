@@ -60,14 +60,14 @@ export async function* streamChatResponse(character, sessionId, userMessage) {
 
   const history = await getChatHistory(character.id, sessionId, config.CHAT_MAX_HISTORY);
 
-  const messages = history.map(msg => ({
+  const systemPrompt = buildSystemPrompt(character);
+  const messages = history.map((msg, i) => ({
     role: msg.role,
-    content: [{ text: msg.content }],
+    content: [{ text: i === 0 && msg.role === 'user' ? `${systemPrompt}\n\n${msg.content}` : msg.content }],
   }));
 
   const command = new ConverseStreamCommand({
     modelId: config.BEDROCK_MODEL_ID,
-    system: [{ text: buildSystemPrompt(character) }],
     messages,
     inferenceConfig: {
       maxTokens: 512,
