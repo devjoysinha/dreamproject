@@ -279,7 +279,7 @@ export default function ConversationClient({ slug }) {
       <nav className={styles.bottomNav}>
         <Link href="/discover"><DashboardIcon name="compass" /><span>Home</span></Link>
         <Link href="/creators"><DashboardIcon name="grid" /><span>Explore</span></Link>
-        <button type="button" onClick={() => setNotice('Studio is coming soon.')}><DashboardIcon name="wand" /><span>Studio</span></button>
+        <Link href="/studio"><DashboardIcon name="wand" /><span>Studio</span></Link>
         <Link href="/chat" className={styles.bottomActive}><DashboardIcon name="message" /><span>Chat</span></Link>
         <Link href="/auth/sign-in"><DashboardIcon name="user" /><span>Profile</span></Link>
       </nav>

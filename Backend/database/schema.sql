@@ -137,3 +137,36 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 
 CREATE INDEX IF NOT EXISTS chat_messages_session_idx ON chat_messages (session_id, created_at);
 CREATE INDEX IF NOT EXISTS chat_messages_character_session_idx ON chat_messages (character_id, session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS studio_presets (
+  id TEXT PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  thumbnail_url TEXT,
+  category TEXT NOT NULL DEFAULT 'image' CHECK (category IN ('image', 'popular', 'new')),
+  style_prompt TEXT NOT NULL,
+  negative_prompt TEXT NOT NULL DEFAULT '',
+  credit_cost INTEGER NOT NULL DEFAULT 5,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS studio_presets_category_idx ON studio_presets (category);
+CREATE INDEX IF NOT EXISTS studio_presets_active_idx ON studio_presets (is_active) WHERE is_active = TRUE;
+
+CREATE TABLE IF NOT EXISTS studio_generations (
+  id BIGSERIAL PRIMARY KEY,
+  preset_id TEXT NOT NULL REFERENCES studio_presets(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  image_url TEXT NOT NULL,
+  width INTEGER NOT NULL DEFAULT 1024,
+  height INTEGER NOT NULL DEFAULT 1024,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS studio_generations_session_idx ON studio_generations (session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS studio_generations_preset_idx ON studio_generations (preset_id, created_at DESC);

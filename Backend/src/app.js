@@ -9,6 +9,7 @@ import { authRouter } from './auth.js';
 import { createHumanSession, createLinkAccessTicket, readCookie, verifyHumanSession, verifyLinkAccessTicket } from './humanVerification.js';
 import { addCredits, COST_PER_OPEN, deductCredits, getOrCreateVisitor, INITIAL_CREDITS } from './credits.js';
 import { getCharacters, getCharacterBySlug, getChatHistory, streamChatResponse } from './chat.js';
+import { getPresets, getPresetBySlug, getGenerations, generateImage } from './studio.js';
 
 const listQuery = z.object({
   query: z.string().trim().max(120).optional(),
@@ -562,6 +563,52 @@ app.post('/api/chat/send/:slug', async (req, res, next) => {
     res.write(`data: ${JSON.stringify({ error: 'Stream interrupted' })}\n\n`);
     res.end();
   }
+});
+
+// ── Studio routes ──
+
+const studioCategoryQuery = z.object({ category: z.enum(['all', 'image', 'popular', 'new']).default('all') });
+const studioGenerateBody = z.object({
+  prompt: z.string().trim().min(1).max(500),
+  sessionId: z.string().min(8).max(128),
+  width: z.coerce.number().int().min(512).max(1536).default(1024),
+  height: z.coerce.number().int().min(512).max(1536).default(1024),
+});
+const studioGalleryQuery = z.object({ sessionId: z.string().min(8).max(128), limit: z.coerce.number().int().min(1).max(50).default(20) });
+
+app.get('/api/studio/presets', async (req, res, next) => {
+  try {
+    const { category } = studioCategoryQuery.parse(req.query);
+    const items = await getPresets(category);
+    res.json({ items });
+  } catch (err) { next(err); }
+});
+
+app.get('/api/studio/presets/:slug', async (req, res, next) => {
+  try {
+    const preset = await getPresetBySlug(req.params.slug);
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
+    const { stylePrompt, negativePrompt, ...safe } = preset;
+    res.json(safe);
+  } catch (err) { next(err); }
+});
+
+app.get('/api/studio/gallery', async (req, res, next) => {
+  try {
+    const { sessionId, limit } = studioGalleryQuery.parse(req.query);
+    const items = await getGenerations(sessionId, limit);
+    res.json({ items });
+  } catch (err) { next(err); }
+});
+
+app.post('/api/studio/generate/:slug', async (req, res, next) => {
+  try {
+    const preset = await getPresetBySlug(req.params.slug);
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
+    const { prompt, sessionId, width, height } = studioGenerateBody.parse(req.body);
+    const result = await generateImage(preset, sessionId, prompt, width, height);
+    res.json(result);
+  } catch (err) { next(err); }
 });
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

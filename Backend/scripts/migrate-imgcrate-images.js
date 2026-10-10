@@ -267,7 +267,9 @@ async function main() {
   await ensureUnavailableImage();
   const { migrated, uploaded, skipped, unavailable } = await migrateObjects(sources);
   await writeJsonFiles(records, migrated);
-  const database = await updateDatabase(migrated);
+  const database = includeDatabaseSourceUrls
+    ? await updateDatabase(migrated)
+    : { skipped: true, models: 0, media: 0 };
   console.log(JSON.stringify({ ...summary, uploaded, alreadyPresent: skipped, unavailable, database, status: 'complete' }, null, 2));
 }
 

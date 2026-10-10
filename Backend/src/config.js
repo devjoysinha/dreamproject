@@ -59,6 +59,8 @@ const schema = z.object({
   AWS_REGION: z.string().default('us-east-1'),
   BEDROCK_MODEL_ID: z.string().default('mistral.mistral-7b-instruct-v0:2'),
   CHAT_MAX_HISTORY: z.coerce.number().int().min(2).max(100).default(20),
+  STUDIO_IMAGE_PROVIDER: z.string().default('pollinations'),
+  STUDIO_GENERATION_CREDIT_COST: z.coerce.number().int().min(1).default(5),
 });
 
 const parsedConfig = schema.parse({

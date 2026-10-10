@@ -38,7 +38,7 @@ export function DashboardBrand() {
 }
 
 const navGroups = [
-  ['Menu', [['Discover', 'compass', '/'], ['Explore', 'grid', '/creators'], ['Studio', 'wand'], ['Chat', 'message', '/chat'], ['Account', 'user', '/auth/sign-in']]],
+  ['Menu', [['Discover', 'compass', '/'], ['Explore', 'grid', '/creators'], ['Studio', 'wand', '/studio'], ['Chat', 'message', '/chat'], ['Account', 'user', '/auth/sign-in']]],
   ['Library', [['Collections', 'layers'], ['Creators', 'users', '/creators'], ['Favorites', 'heart'], ['Downloads', 'download']]],
   ['Other', [['Upgrade', 'crown', '/upgrade'], ['Rewards', 'gift']]],
 ];
@@ -157,7 +157,7 @@ export function DiscoverDashboard({ initialData = {}, page = 'discover' }) {
       {isLoading ? <div className={styles.skeletonGrid} aria-label="Loading creators">{Array.from({ length: 8 }, (_, index) => <div key={index} />)}</div> : visibleCreators.length ? <section className={styles.creatorGrid} aria-label="Creator results">{visibleCreators.map((creator, index) => <CreatorCard key={creator.id} creator={creator} eager={index === 0} saved={saved.includes(creator.id)} onSave={toggleSaved} onPreview={setPreview} />)}</section> : <section className={styles.empty}><DashboardIcon name="search" size={28} /><h2>No creators found</h2><p>Try another search term or remove the active filters.</p><button type="button" onClick={() => { setQuery(''); setQueryDraft(''); resetFilters(); }}>Clear filters</button></section>}
       {creators.length < total && <button className={styles.loadMore} type="button" onClick={loadMore} disabled={isLoadingMore}>{isLoadingMore ? 'Loading creators…' : 'Load more creators'} <DashboardIcon name="arrow" size={16} /></button>}
     </main>
-    <nav className={styles.bottomNav} aria-label="Mobile navigation"><Link href="/discover" className={page === 'discover' ? styles.bottomActive : ''}><DashboardIcon name="compass" /><span>Home</span></Link><Link href="/creators" className={page === 'creators' ? styles.bottomActive : ''}><DashboardIcon name="grid" /><span>Explore</span></Link><button type="button" onClick={() => setNotice('Studio is coming soon.')}><DashboardIcon name="wand" /><span>Studio</span></button><button type="button" onClick={() => setNotice('Saved creator lists are coming soon.')}><DashboardIcon name="bookmark" /><span>Saved</span></button><button type="button" onClick={() => setNotice('Account features are coming soon.')}><DashboardIcon name="user" /><span>Profile</span></button></nav>
+    <nav className={styles.bottomNav} aria-label="Mobile navigation"><Link href="/discover" className={page === 'discover' ? styles.bottomActive : ''}><DashboardIcon name="compass" /><span>Home</span></Link><Link href="/creators" className={page === 'creators' ? styles.bottomActive : ''}><DashboardIcon name="grid" /><span>Explore</span></Link><Link href="/studio"><DashboardIcon name="wand" /><span>Studio</span></Link><button type="button" onClick={() => setNotice('Saved creator lists are coming soon.')}><DashboardIcon name="bookmark" /><span>Saved</span></button><button type="button" onClick={() => setNotice('Account features are coming soon.')}><DashboardIcon name="user" /><span>Profile</span></button></nav>
     <PreviewDialog creator={preview} saved={preview && saved.includes(preview.id)} onClose={() => setPreview(null)} onSave={toggleSaved} />
     {notice && <div className={styles.toast} role="status"><DashboardIcon name="info" size={16} />{notice}</div>}
   </div>;
