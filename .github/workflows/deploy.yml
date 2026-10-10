@@ -33,6 +33,7 @@ jobs:
               "sudo -u ec2-user git fetch origin",
               "sudo -u ec2-user git checkout main",
               "sudo -u ec2-user git pull origin main",
+              "rm -rf /opt/dreamproject/Frontend/.next",
               "cd Frontend && sudo -u ec2-user npm run build",
               "systemctl restart dream-frontend",
               "systemctl restart dream-backend",
