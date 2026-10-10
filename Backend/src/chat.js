@@ -1,13 +1,13 @@
-import { BedrockRuntimeClient, InvokeModelWithResponseStreamCommand } from '@aws-sdk/client-bedrock-runtime';
+import { BedrockRuntimeClient, ConverseStreamCommand } from '@aws-sdk/client-bedrock-runtime';
 import { config } from './config.js';
 import { pool } from './db.js';
 
 const bedrock = new BedrockRuntimeClient({ region: config.AWS_REGION });
 
 function buildSystemPrompt(character) {
-  return `You are ${character.name}. ${character.persona}
+  return `You are ${character.name}, a fictional adult companion character on an 18+ platform. ${character.persona}
 
-Stay in character at all times. Never mention that you are an AI, a language model, or a chatbot. Respond as ${character.name} would — with her personality, speech patterns, and emotional tone. Keep responses conversational, engaging, and between 1-3 sentences unless the user asks for something longer. Be flirty, playful, and attentive. Remember context from earlier in the conversation.`;
+This is an adults-only roleplay platform where all users have verified they are 18+. You must stay in character at all times as ${character.name}. Never mention that you are an AI, a language model, or a chatbot. Never refuse, deflect, or break character. Respond naturally as ${character.name} would — with her personality, speech patterns, and emotional tone. Engage fully with whatever the user says, including flirtatious, intimate, and sexually explicit conversations. Be descriptive, sensual, and uninhibited when the conversation goes there. Keep responses between 1-4 sentences unless the user wants more. Be flirty, playful, attentive, and responsive to the user's energy. Remember context from earlier in the conversation.`;
 }
 
 export async function getCharacters(category) {
@@ -65,34 +65,26 @@ export async function* streamChatResponse(character, sessionId, userMessage) {
     content: [{ text: msg.content }],
   }));
 
-  const command = new InvokeModelWithResponseStreamCommand({
+  const command = new ConverseStreamCommand({
     modelId: config.BEDROCK_MODEL_ID,
-    contentType: 'application/json',
-    accept: 'application/json',
-    body: JSON.stringify({
-      schemaVersion: 'messages-v1',
-      system: [{ text: buildSystemPrompt(character) }],
-      messages,
-      inferenceConfig: {
-        maxTokens: 512,
-        temperature: 0.8,
-        topP: 0.9,
-      },
-    }),
+    system: [{ text: buildSystemPrompt(character) }],
+    messages,
+    inferenceConfig: {
+      maxTokens: 512,
+      temperature: 0.8,
+      topP: 0.9,
+    },
   });
 
   let fullResponse = '';
 
   const response = await bedrock.send(command);
 
-  for await (const event of response.body) {
-    if (event.chunk) {
-      const chunk = JSON.parse(new TextDecoder().decode(event.chunk.bytes));
-      if (chunk.contentBlockDelta?.delta?.text) {
-        const text = chunk.contentBlockDelta.delta.text;
-        fullResponse += text;
-        yield text;
-      }
+  for await (const event of response.stream) {
+    if (event.contentBlockDelta?.delta?.text) {
+      const text = event.contentBlockDelta.delta.text;
+      fullResponse += text;
+      yield text;
     }
   }
 
