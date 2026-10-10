@@ -520,6 +520,36 @@ class ResolverAccountingTests(unittest.TestCase):
         self.assertEqual(len(attempted), 2)
         self.assertNotIn("c", attempted)
 
+    def test_silent_block_aborts_after_consecutive_unresolved_batches(self) -> None:
+        pages = [
+            _FakePage("https://leakshaven.com/get-link") for _ in range(7)
+        ]
+
+        with (
+            mock.patch.object(scraper, "encrypted_content_id", return_value="encrypted"),
+            mock.patch.object(scraper.time, "monotonic", side_effect=[
+                0.0, 100.0,
+                200.0, 300.0,
+                400.0, 500.0,
+                600.0, 700.0,
+                800.0, 900.0,
+            ]),
+            mock.patch.object(scraper.time, "sleep"),
+        ):
+            resolved, attempted = scraper.resolve_batch(
+                _SequenceContext(pages),
+                source_page=_OriginPage(),
+                content_ids=["a", "b", "c", "d", "e", "f", "g"],
+                batch_size=1,
+                navigation_timeout=8,
+                settle_timeout=10,
+            )
+
+        self.assertEqual(resolved, {})
+        self.assertEqual(len(attempted), 5)
+        self.assertNotIn("f", attempted)
+        self.assertNotIn("g", attempted)
+
     def test_browser_crash_does_not_age_links_that_never_opened(self) -> None:
         destination = "https://mega.nz/folder/abc#secret"
         page = _FakePage(destination)

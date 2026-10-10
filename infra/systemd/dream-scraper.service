@@ -14,7 +14,7 @@ RuntimeDirectoryMode=0750
 ExecStart=/usr/bin/flock -n /run/dream-scraper/scraper.lock /opt/dreamproject/Scarper/.venv/bin/python /opt/dreamproject/Scarper/leakshaven_root_scraper.py
 # Bounded direct-link batches trade a little throughput for a stable browser
 # process.  The overall job still has room to finish a full feed window.
-TimeoutStartSec=20min
+TimeoutStartSec=45min
 Nice=10
 NoNewPrivileges=true
 PrivateTmp=true

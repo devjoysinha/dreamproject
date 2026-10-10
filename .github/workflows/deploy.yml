@@ -37,6 +37,9 @@ jobs:
               "cd Frontend && sudo -u ec2-user npm run build",
               "systemctl restart dream-frontend",
               "systemctl restart dream-backend",
+              "cp /opt/dreamproject/infra/systemd/dream-scraper.service /etc/systemd/system/dream-scraper.service",
+              "cp /opt/dreamproject/infra/systemd/dream-scraper.timer /etc/systemd/system/dream-scraper.timer",
+              "systemctl daemon-reload",
               "echo DEPLOY_OK"
             ]' \
             --query 'Command.CommandId' \

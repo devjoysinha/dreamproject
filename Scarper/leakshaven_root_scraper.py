@@ -590,6 +590,7 @@ def resolve_batch(
         )
 
     consecutive_validation_failures = 0
+    consecutive_failures = 0
 
     for offset in range(0, len(content_ids), batch_size):
         pages: Dict[str, Any] = {}
@@ -674,21 +675,34 @@ def resolve_batch(
                 except PlaywrightError:
                     pass
         batch_resolved_any = any(cid in resolved for cid in batch_ids)
-        if batch_hit_validation and not batch_resolved_any:
+        if batch_resolved_any:
+            consecutive_validation_failures = 0
+            consecutive_failures = 0
+        elif batch_hit_validation:
             consecutive_validation_failures += 1
+            consecutive_failures += 1
             LOGGER.warning(
                 "Source validation detected on batch %d (consecutive failures: %d).",
                 offset // batch_size + 1,
                 consecutive_validation_failures,
             )
-        elif batch_resolved_any:
-            consecutive_validation_failures = 0
+        else:
+            consecutive_failures += 1
         if consecutive_validation_failures >= 2:
             remaining = len(content_ids) - (offset + batch_size)
             LOGGER.warning(
                 "Aborting resolution after %d consecutive validation failures; "
                 "%d links deferred to next run.",
                 consecutive_validation_failures,
+                max(0, remaining),
+            )
+            break
+        if consecutive_failures >= 5:
+            remaining = len(content_ids) - (offset + batch_size)
+            LOGGER.warning(
+                "Aborting after %d consecutive unresolved batches (session likely blocked); "
+                "%d links deferred to session rotation.",
+                consecutive_failures,
                 max(0, remaining),
             )
             break
@@ -703,7 +717,7 @@ def resolve_batch(
                 backoff = inter_batch_delay * (2 ** consecutive_validation_failures)
                 time.sleep(min(backoff, 30))
             else:
-                time.sleep(inter_batch_delay)
+                time.sleep(inter_batch_delay + min(consecutive_failures, 3))
 
     unresolved = len(attempted_ids) - len(resolved)
     LOGGER.info(
